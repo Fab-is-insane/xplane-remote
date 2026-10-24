@@ -191,6 +191,8 @@ What the header tells you:
 | **Sim offline** (red) | X-Plane's Web API is not reachable (sim closed or API disabled). |
 | **Server offline** (red) | The phone cannot reach the app (PC asleep, app stopped, or Tailscale off). |
 
+**After T/D** the card switches to **ETA to destination**. It shows a live estimate (FMC route distance `laminar/B738/FMS/dist_dest` ÷ current ground speed, with your local clock time) and the FMC's own ETA (`laminar/B738/FMS/time_dest`, Zulu). The live figure runs a little early in the descent because you slow down on approach; the FMC figure accounts for that. Details: [docs/INVESTIGATION.md](docs/INVESTIGATION.md#destination-eta-zibo-737).
+
 **T/D** comes from the Zibo FMC dataref `laminar/B738/fms/vnav_td_dist` (along-track NM). The card shows *No T/D* until you have a route with CRZ ALT and executed PERF INIT, *Calculating* while the FMC recomputes, and *Passed* after T/D. With other aircraft it shows "—". The "≈ N min" figure is distance ÷ current ground speed, an estimate only. Details: [docs/INVESTIGATION.md](docs/INVESTIGATION.md#top-of-descent-zibo-737).
 
 ## 11. Authentication

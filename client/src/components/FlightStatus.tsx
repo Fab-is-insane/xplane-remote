@@ -1,5 +1,19 @@
 import type { PublicState } from '../api';
-import { DASH, flightLevel, fmtAge, fmtClock, fmtEta, fmtHeading, fmtInt, fmtLat, fmtLon, fmtNm, fmtSigned } from '../format';
+import {
+  DASH,
+  flightLevel,
+  fmtAge,
+  fmtClock,
+  fmtDuration,
+  fmtEta,
+  fmtHeading,
+  fmtInt,
+  fmtLat,
+  fmtLon,
+  fmtLocalTime,
+  fmtNm,
+  fmtSigned,
+} from '../format';
 
 interface Props {
   state: PublicState | null;
@@ -11,6 +25,9 @@ interface Props {
 export function FlightStatus({ state, live, ageMs }: Props) {
   const t = state?.telemetry;
   const tod = state?.tod;
+  const dest = state?.dest;
+  // After T/D the question changes from "when do I descend" to "when do I land".
+  const showArrival = tod?.status === 'passed' && Boolean(dest?.available);
   const stale = !live && Boolean(t?.lastUpdate);
 
   const vs = t?.verticalSpeedFpm ?? null;
@@ -31,7 +48,14 @@ export function FlightStatus({ state, live, ageMs }: Props) {
         </p>
       )}
 
-      <TodPanel tod={tod ?? null} gsKt={t?.groundspeedKt ?? null} />
+      {showArrival && dest ? (
+        <ArrivalPanel dest={dest} />
+      ) : (
+        <>
+          <TodPanel tod={tod ?? null} gsKt={t?.groundspeedKt ?? null} />
+          {dest?.available && <DestLine dest={dest} />}
+        </>
+      )}
 
       <dl className="tiles">
         <Tile label="ALT_IND" value={fmtInt(t?.altitudeFt ?? null)} unit="ft" hint={flightLevel(t?.altitudeFt ?? null) ?? 'indicated'} wide />
@@ -81,6 +105,10 @@ export function FlightStatus({ state, live, ageMs }: Props) {
           <dd>{state?.apiVersion ?? DASH}</dd>
           <dt>t/d src</dt>
           <dd className="mono-sm">{tod?.source ?? DASH}</dd>
+          <dt>dest src</dt>
+          <dd className="mono-sm">{dest?.available ? 'laminar/B738/FMS/dist_dest + time_dest' : DASH}</dd>
+          <dt>eta model</dt>
+          <dd className="mono-sm">dist_dest ÷ GS (live) · FMC time_dest − sim zulu</dd>
         </dl>
       </details>
     </section>
@@ -145,5 +173,40 @@ function TodPanel({ tod, gsKt }: { tod: PublicState['tod'] | null; gsKt: number 
       </span>
       {note && <span className="tod-note">{note}</span>}
     </div>
+  );
+}
+
+/** After T/D: big "time to go" from live telemetry, with the FMC's own ETA beside it. */
+function ArrivalPanel({ dest }: { dest: PublicState['dest'] }) {
+  const live = dest.liveEtaMinutes;
+  const fmc = dest.fmcEtaMinutes;
+  const value = live !== null ? fmtDuration(live) : fmc !== null ? fmtDuration(fmc) : `${fmtNm(dest.distanceNm)} NM`;
+  const notes = [
+    live !== null ? `≈ ${fmtLocalTime(dest.liveEtaAt)} local · ${fmtNm(dest.distanceNm)} NM to go @ current GS` : dest.detail,
+    dest.fmcEtaZulu ? `FMC ETA ${dest.fmcEtaZulu}Z${fmc !== null ? ` (in ${fmtDuration(fmc)})` : ''}` : null,
+  ].filter(Boolean);
+  return (
+    <div className="tod tone-good" role="group" aria-label="Estimated time to destination">
+      <span className="tod-label">ETA {dest.icao ?? 'DEST'} · T/D PASSED</span>
+      <span className="tod-value">
+        <span className="num">{value}</span>
+      </span>
+      {notes.map((n) => (
+        <span key={n} className="tod-note">
+          {n}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Before T/D: one compact line about the destination. */
+function DestLine({ dest }: { dest: PublicState['dest'] }) {
+  return (
+    <p className="dest-line">
+      <span className="dim">dest</span> {dest.icao ?? '----'} · {fmtNm(dest.distanceNm)} NM
+      {dest.fmcEtaZulu && <> · FMC ETA {dest.fmcEtaZulu}Z</>}
+      {dest.liveEtaMinutes !== null && <> · ≈ {fmtDuration(dest.liveEtaMinutes)}</>}
+    </p>
   );
 }

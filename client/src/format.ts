@@ -58,6 +58,20 @@ export function fmtClock(epochMs: number | null): string {
   return new Date(epochMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+/** "23 min", "1 h 05 min". */
+export function fmtDuration(min: number | null): string {
+  if (min === null) return DASH;
+  const m = Math.max(0, Math.round(min));
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
+}
+
+/** Wall-clock time on this phone, e.g. "19:53". */
+export function fmtLocalTime(epochMs: number | null): string {
+  if (epochMs === null) return DASH;
+  return new Date(epochMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 /** Rough time to go at the current ground speed, clearly an estimate. */
 export function fmtEta(distanceNm: number | null, gsKt: number | null): string | null {
   if (distanceNm === null || gsKt === null || gsKt < 60) return null;

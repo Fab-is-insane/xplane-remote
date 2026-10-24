@@ -43,6 +43,10 @@ export class MockSimulator implements SimSource {
       ziboTdDist: Math.max(this.tdNm, -5),
       ziboTdIdx: 7,
       ziboFlightPhase: this.tdNm > 0 ? 2 : 5,
+      zuluTimeSec: (Date.now() / 1000) % 86400,
+      ziboDestDist: Math.max(this.tdNm + 105, 3),
+      ziboDestEta: mockEta(Math.max(this.tdNm + 105, 3) / 260),
+      ziboDestIcao: 'MOCK',
     };
     return {
       source: 'mock',
@@ -92,3 +96,9 @@ export class MockSimulator implements SimSource {
 }
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** "HHMM" Zulu, `hours` from now — mimics the Zibo FMC's time_dest format. */
+function mockEta(hours: number): string {
+  const t = new Date(Date.now() + hours * 3600_000);
+  return `${String(t.getUTCHours()).padStart(2, '0')}${String(t.getUTCMinutes()).padStart(2, '0')}`;
+}

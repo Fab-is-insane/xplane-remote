@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTelemetry, interpretTod } from '../src/telemetry.js';
+import { buildTelemetry, interpretDest, interpretTod } from '../src/telemetry.js';
 import type { TelemetryKey } from '../src/xplane/datarefs.js';
 import type { SimStatus } from '../src/xplane/simSource.js';
 
@@ -93,5 +93,55 @@ describe('interpretTod (Zibo 737)', () => {
   it('ignores non-numeric garbage', () => {
     const r = interpretTod(status({ ziboTdDist: 'abc' as unknown as number, ziboTdIdx: 5 }));
     expect(r.status).toBe('unavailable');
+  });
+});
+
+describe('interpretDest (Zibo route + live telemetry)', () => {
+  const NOW = 1_000_000;
+  const KT = 1 / 1.9438444924406; // m/s per knot
+
+  it('is unavailable without the Zibo destination datarefs', () => {
+    expect(interpretDest(status({ groundspeedMs: 200 }), NOW).available).toBe(false);
+  });
+
+  it('is unavailable when the FMC has no route (distance 0)', () => {
+    const r = interpretDest(status({ ziboDestDist: 0, ziboDestEta: '', groundspeedMs: 200 }), NOW);
+    expect(r).toMatchObject({ available: false, detail: 'No route in the FMC.' });
+  });
+
+  it('computes the live ETA from route distance and ground speed', () => {
+    const r = interpretDest(status({ ziboDestDist: 120, groundspeedMs: 240 * KT, ziboDestIcao: 'VIDP' }), NOW);
+    expect(r.available).toBe(true);
+    expect(r.icao).toBe('VIDP');
+    expect(r.distanceNm).toBe(120);
+    expect(r.liveEtaMinutes).toBeCloseTo(30, 1);
+    expect(r.liveEtaAt).toBe(NOW + 30 * 60_000);
+  });
+
+  it('gives no live ETA below 60 kt (taxi / parked)', () => {
+    const r = interpretDest(status({ ziboDestDist: 4, groundspeedMs: 10 * KT }), NOW);
+    expect(r.available).toBe(true);
+    expect(r.liveEtaMinutes).toBeNull();
+    expect(r.liveEtaAt).toBeNull();
+  });
+
+  it('turns the FMC "HHMM" ETA into minutes by the sim Zulu clock', () => {
+    const r = interpretDest(status({ ziboDestDist: 80, ziboDestEta: '1430', zuluTimeSec: 14 * 3600 + 5 * 60 }), NOW);
+    expect(r).toMatchObject({ fmcEtaZulu: '1430', fmcEtaMinutes: 25 });
+  });
+
+  it('handles an FMC ETA after midnight', () => {
+    const r = interpretDest(status({ ziboDestDist: 80, ziboDestEta: '0010', zuluTimeSec: 23 * 3600 + 50 * 60 }), NOW);
+    expect(r.fmcEtaMinutes).toBe(20);
+  });
+
+  it('treats an FMC ETA just behind the clock as arriving now', () => {
+    const r = interpretDest(status({ ziboDestDist: 2, ziboDestEta: '1429', zuluTimeSec: 14 * 3600 + 30 * 60 }), NOW);
+    expect(r.fmcEtaMinutes).toBe(0);
+  });
+
+  it('ignores a malformed FMC ETA string', () => {
+    const r = interpretDest(status({ ziboDestDist: 80, ziboDestEta: '----', zuluTimeSec: 100 }), NOW);
+    expect(r).toMatchObject({ fmcEtaZulu: null, fmcEtaMinutes: null });
   });
 });

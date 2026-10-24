@@ -2,7 +2,7 @@
 // Unit conversion and the Zibo T/D interpretation live here so they are
 // covered by unit tests.
 
-import type { ControlInfo, PublicState, Telemetry, TodInfo } from './shared/api-types.js';
+import type { ControlInfo, DestInfo, PublicState, Telemetry, TodInfo } from './shared/api-types.js';
 import { FT_PER_M, KT_PER_MS } from './xplane/datarefs.js';
 import type { PauseCapability, SimStatus } from './xplane/simSource.js';
 
@@ -92,6 +92,68 @@ export function interpretTod(status: SimStatus): TodInfo {
   return { status: 'passed', distanceNm: round(Math.abs(dist), 1), detail: 'T/D passed.', source: TD_SOURCE };
 }
 
+/** Minimum ground speed for a distance ÷ speed estimate to mean anything. */
+const MIN_ETA_GS_KT = 60;
+
+/**
+ * Destination ETA from the Zibo FMC route plus live telemetry:
+ *  - live:  laminar/B738/FMS/dist_dest ÷ current ground speed → minutes and a real clock time
+ *  - FMC:   laminar/B738/FMS/time_dest ("HHMM" Zulu) vs sim/time/zulu_time_sec → minutes
+ */
+export function interpretDest(status: SimStatus, now: number): DestInfo {
+  const v = status.values;
+  const none = (detail: string): DestInfo => ({
+    available: false,
+    icao: null,
+    distanceNm: null,
+    liveEtaMinutes: null,
+    liveEtaAt: null,
+    fmcEtaZulu: null,
+    fmcEtaMinutes: null,
+    detail,
+  });
+  if (!status.available.has('ziboDestDist')) return none('Destination data needs the Zibo 737 FMC.');
+  const dist = num(v.ziboDestDist);
+  if (dist === null || dist <= 0) return none('No route in the FMC.');
+
+  const gsMs = num(v.groundspeedMs);
+  const gsKt = gsMs === null ? null : gsMs * KT_PER_MS;
+  let liveEtaMinutes: number | null = null;
+  if (gsKt !== null && gsKt >= MIN_ETA_GS_KT) liveEtaMinutes = (dist / gsKt) * 60;
+
+  const etaRaw = str(v.ziboDestEta);
+  const m = etaRaw?.match(/^(\d{2})(\d{2})/);
+  let fmcEtaZulu: string | null = null;
+  let fmcEtaMinutes: number | null = null;
+  if (m) {
+    const hh = Number(m[1]);
+    const mm = Number(m[2]);
+    if (hh < 24 && mm < 60) {
+      fmcEtaZulu = `${m[1]}${m[2]}`;
+      const zulu = num(v.zuluTimeSec);
+      if (zulu !== null) {
+        const diffMin = ((hh * 3600 + mm * 60 - zulu + 86400) % 86400) / 60;
+        // A wrap to ~24 h means the FMC time is just behind the clock: treat as arriving now.
+        fmcEtaMinutes = diffMin > 20 * 60 ? 0 : diffMin;
+      }
+    }
+  }
+
+  return {
+    available: true,
+    icao: str(v.ziboDestIcao),
+    distanceNm: round(dist, 1),
+    liveEtaMinutes: round(liveEtaMinutes, 1),
+    liveEtaAt: liveEtaMinutes === null ? null : Math.round(now + liveEtaMinutes * 60_000),
+    fmcEtaZulu,
+    fmcEtaMinutes: round(fmcEtaMinutes, 0),
+    detail:
+      liveEtaMinutes === null
+        ? 'Live ETA needs ground speed above 60 kt.'
+        : 'Live ETA = FMC route distance ÷ current ground speed.',
+  };
+}
+
 export function buildControlInfo(cap: PauseCapability, inFlight: ControlInfo['inFlight']): ControlInfo {
   return { available: cap.ok, reason: cap.reason, inFlight, commandMode: cap.mode };
 }
@@ -112,6 +174,7 @@ export function buildPublicState(
     apiVersion: status.apiVersion,
     telemetry: buildTelemetry(status, now, staleMs),
     tod: interpretTod(status),
+    dest: interpretDest(status, now),
     control: buildControlInfo(cap, inFlight),
   };
 }

@@ -21,9 +21,13 @@ export type TelemetryKey =
   | 'longitude'
   | 'acfIcao'
   | 'acfName'
+  | 'zuluTimeSec'
   | 'ziboTdDist'
   | 'ziboTdIdx'
-  | 'ziboFlightPhase';
+  | 'ziboFlightPhase'
+  | 'ziboDestDist'
+  | 'ziboDestEta'
+  | 'ziboDestIcao';
 
 export interface DatarefSpec {
   key: TelemetryKey;
@@ -60,6 +64,8 @@ export const DATAREFS: readonly DatarefSpec[] = [
   { key: 'longitude', name: 'sim/flightmodel/position/longitude', kind: 'number', group: 'sim', unit: 'deg' },
   { key: 'acfIcao', name: 'sim/aircraft/view/acf_ICAO', kind: 'string', group: 'sim', unit: 'text' },
   { key: 'acfName', name: 'sim/aircraft/view/acf_ui_name', kind: 'string', group: 'sim', unit: 'text' },
+  // Sim clock (seconds since midnight UTC), to turn the FMC's "HHMM" ETA into minutes remaining.
+  { key: 'zuluTimeSec', name: 'sim/time/zulu_time_sec', kind: 'number', group: 'sim', unit: 's' },
 
   // Zibo 737-800 FMC (xlua). Along-track NM from the aircraft to T/D:
   // lnav_dist_next + remaining leg distances to the T/D leg − T/D offset.
@@ -70,6 +76,11 @@ export const DATAREFS: readonly DatarefSpec[] = [
   { key: 'ziboTdIdx', name: 'laminar/B738/fms/vnav_td_idx', kind: 'number', group: 'aircraft', unit: 'index' },
   // Zibo FMS flight phase (2 = cruise; < 5 before descent; 8 = special case used with T/D).
   { key: 'ziboFlightPhase', name: 'laminar/B738/FMS/flight_phase', kind: 'number', group: 'aircraft', unit: 'enum' },
+  // Zibo FMC: NM to destination along the route (sum of remaining legs from the aircraft).
+  { key: 'ziboDestDist', name: 'laminar/B738/FMS/dist_dest', kind: 'number', group: 'aircraft', unit: 'nm' },
+  // Zibo FMC: its own predicted arrival time, "HHMM" in sim Zulu time ("" when unknown).
+  { key: 'ziboDestEta', name: 'laminar/B738/FMS/time_dest', kind: 'string', group: 'aircraft', unit: 'HHMM' },
+  { key: 'ziboDestIcao', name: 'laminar/B738/fms/dest_icao', kind: 'string', group: 'aircraft', unit: 'text' },
 ];
 
 export const DATAREF_BY_NAME: ReadonlyMap<string, DatarefSpec> = new Map(DATAREFS.map((d) => [d.name, d]));

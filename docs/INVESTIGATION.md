@@ -95,6 +95,31 @@ Interpretation used (`server/src/telemetry.ts`):
 
 **Not verified live.** The meaning comes from reading the 4.05.33 source. A different Zibo version may behave differently. The "≈ min" figure in the UI is a simple distance ÷ ground-speed estimate and is labelled as such.
 
+## Destination ETA (Zibo 737)
+
+Datarefs from the same Zibo file:
+
+```lua
+dist_dest              = create_dataref("laminar/B738/FMS/dist_dest", "number")  -- line 5696
+time_dest              = create_dataref("laminar/B738/FMS/time_dest", "string")  -- line 5697
+B738DR_dest_icao       = create_dataref("laminar/B738/fms/dest_icao", "string")  -- line 6176
+```
+
+- `dist_dest` is summed by the FMC from the aircraft along the remaining legs (`lnav_dist_next` for the active leg, then `wpt_distance(n)` for each later leg; around line 160717). Unit is NM, and it is 0 without a route.
+- `time_dest` is the FMC's predicted arrival as `"HHMM"` in sim Zulu time (`time_to_string(legs_data[n][13])`, line 161159), and `""` when unknown.
+- `sim/time/zulu_time_sec` (float, seconds since midnight) converts that into minutes remaining.
+
+The app shows two ETAs (`interpretDest` in `server/src/telemetry.ts`):
+
+| | Formula | Strength |
+|---|---|---|
+| **Live** | `dist_dest ÷ current GS` → minutes, plus real local clock time | Reacts instantly to the actual speed; tells you when to be back at the PC. Too early in the descent, because GS will drop on approach. |
+| **FMC** | `time_dest − zulu_time_sec` | Uses the FMC's speed schedule. Depends on the FMC's performance data, and is in sim time. |
+
+The live ETA is hidden below 60 kt GS. After T/D the T/D card is replaced by the arrival card. Before T/D, a one-line destination summary is shown.
+
+**Live-verified 2026-10-24** in descent into VABB: all four datarefs resolved (`double` / `data` / `data` / `float`). The panel showed 33.4 NM, a live estimate of 7 min and an FMC ETA of 1151Z (in 11 min).
+
 ## WebFMC
 
 - Served by a Go backend (`gorilla/websocket`) from `Resources/plugins/WebFMC/data`. `index.html` loads `/static/js/app.<hash>.js`, `/static/js/chunk-vendors.<hash>.js` and `/static/css/app.<hash>.css`.

@@ -530,7 +530,15 @@ a {
 }
 
 .tod-note {
+  grid-column: 1;
   font-size: 11px;
+  color: var(--muted);
+}
+
+.dest-line {
+  margin: -2px 0 10px;
+  padding: 0 2px;
+  font-size: 12px;
   color: var(--muted);
 }
 

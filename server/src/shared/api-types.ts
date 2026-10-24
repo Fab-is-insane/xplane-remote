@@ -56,6 +56,22 @@ export interface TodInfo {
   source: string | null;
 }
 
+export interface DestInfo {
+  /** False when there is no Zibo route/destination to work from. */
+  available: boolean;
+  icao: string | null;
+  /** Along-route distance to destination from the Zibo FMC (NM). */
+  distanceNm: number | null;
+  /** Live estimate: route distance ÷ current ground speed. Null below 60 kt. */
+  liveEtaMinutes: number | null;
+  /** Real-world clock time for the live estimate (epoch ms), so the phone can show local time. */
+  liveEtaAt: number | null;
+  /** The FMC's own ETA ("HHMM", sim Zulu) and the minutes until it by the sim clock. */
+  fmcEtaZulu: string | null;
+  fmcEtaMinutes: number | null;
+  detail: string;
+}
+
 export type PauseAction = 'pause' | 'resume';
 
 export interface ControlInfo {
@@ -75,6 +91,7 @@ export interface PublicState {
   apiVersion: string | null;
   telemetry: Telemetry;
   tod: TodInfo;
+  dest: DestInfo;
   control: ControlInfo;
 }
 
