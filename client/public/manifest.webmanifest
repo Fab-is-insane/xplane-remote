@@ -1,0 +1,9 @@
+{
+  "name": "X-Plane Remote",
+  "short_name": "XP Remote",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a1322",
+  "theme_color": "#0a1322",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
