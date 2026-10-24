@@ -220,10 +220,11 @@ export class WebFmcProxy {
 
   /** Bridge an (already authenticated) upgrade request on /webfmc/ws to WebFMC's /ws. */
   handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
-    this.wss.handleUpgrade(req, socket, head, (client) => this.bridge(client));
+    const ua = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'].slice(0, 300) : undefined;
+    this.wss.handleUpgrade(req, socket, head, (client) => this.bridge(client, ua));
   }
 
-  private bridge(client: WebSocket) {
+  private bridge(client: WebSocket, userAgent?: string) {
     const target = new URL('/ws', this.opts.upstream);
     target.protocol = 'ws:';
     const upstream = new WebSocket(target, {
@@ -231,6 +232,8 @@ export class WebFmcProxy {
       origin: this.opts.upstream.origin,
       handshakeTimeout: this.timeoutMs,
       maxPayload: MAX_WS_PAYLOAD,
+      // Only the User-Agent is passed on (WebFMC logs it to tell devices apart); never cookies.
+      headers: userAgent ? { 'User-Agent': userAgent } : {},
     });
     this.bridges.add(client);
     const queue: Array<[WebSocket.RawData, boolean]> = [];

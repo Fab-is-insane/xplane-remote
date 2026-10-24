@@ -9,7 +9,7 @@ That is low-stakes compared with most software, but this design keeps the PC fro
 |---|---|
 | Control of the simulator (pause/resume, WebFMC key presses) | Someone else pausing your 8-hour flight, or typing into the FMC. |
 | The PC's local services (X-Plane API on 8086, WebFMC on 9090, anything else on localhost) | The app must not become a bridge from the network to them. |
-| `APP_PASSWORD` / `SESSION_SECRET` | Grant the above. |
+| `APP_PASSWORD` (PIN) / `SESSION_SECRET` | Grant the above. |
 
 ## Trust boundaries
 
@@ -27,8 +27,8 @@ Browser on the PC ────────────────────�
 - The X-Plane Web API stays on loopback. It is never published through Tailscale.
 
 **Authentication**
-- Password login. The comparison is constant-time on SHA-256 digests, and the input length is capped.
-- Session = HMAC-SHA256-signed cookie (`HttpOnly`, `SameSite=Strict`, `Secure` behind HTTPS), 30-day expiry. The key is derived from `SESSION_SECRET` + the password, so changing either one revokes every session.
+- PIN login (`APP_PASSWORD`, default `5463`, chosen for convenience). The comparison is constant-time on SHA-256 digests, and the input length is capped.
+- Session = HMAC-SHA256-signed cookie (`HttpOnly`, `SameSite=Strict`, `Secure` behind HTTPS), 30-day expiry. The key is derived from `SESSION_SECRET` + the PIN, so changing either one revokes every session.
 - A global brute-force guard: 10 failures / 10 min → 10 min lock, plus a 400 ms delay per failure. It is global because every request arrives from 127.0.0.1 behind Serve.
 - Every endpoint except `GET /api/health` and the login route requires a session. That includes read-only telemetry and the WebFMC proxy, because WebFMC buttons change FMC state.
 
@@ -56,7 +56,7 @@ Browser on the PC ────────────────────�
 - The browser never talks to `localhost` services directly. Everything goes through the app's own origin.
 
 **Secrets**
-- `.env` is git-ignored. `.env.example` contains no secrets. `npm run setup` generates a 20-character password (~99 bits) and a 256-bit session secret locally.
+- `.env` is git-ignored. `.env.example` contains only the default PIN, no generated secrets. `npm run setup` sets the PIN (default `5463`) and generates a 256-bit session secret locally.
 - Tailscale Serve adds a `Tailscale-User-Login` header. The app logs it next to sign-ins and control actions for auditing, but **never** uses it for authorization.
 
 ## Threats considered
@@ -64,9 +64,9 @@ Browser on the PC ────────────────────�
 | Threat | Mitigation |
 |---|---|
 | Stranger on the internet | Not reachable: loopback bind, Serve is tailnet-only, no Funnel / port forward. |
-| Another device or user in your tailnet | Must know the password. Use Tailscale ACLs to limit which devices can reach the PC. |
+| Another device or user in your tailnet | Must know the PIN. Use Tailscale ACLs to limit which devices can reach the PC. |
 | Malicious website opened on the phone or PC (CSRF / DNS rebinding) | SameSite=Strict cookie, custom header, Origin check, Host allow-list, no CORS. |
-| Password guessing | Long random password, global lockout, per-failure delay. |
+| PIN guessing | Only possible from inside your tailnet. Global lockout (10 tries → 10 min) + per-failure delay: trying all 10,000 four-digit PINs would take about a week of continuous attempts. Use a longer `APP_PASSWORD` if you share your tailnet with others. |
 | Lost/stolen phone | Remove it from the tailnet (admin console → Machines) and/or `npm run setup -- --rotate`. |
 | Abuse of the app as a proxy to other local services | Fixed loopback upstreams, path allow-list, no user-supplied URLs. |
 | Arbitrary simulator control | Only three allow-listed commands; no dataref writes; no generic endpoints. |
@@ -80,5 +80,5 @@ WebFMC listens on **all interfaces** without authentication. Its own log shows a
 ### Same-origin WebFMC
 WebFMC runs on the app's origin inside the iframe, so its JavaScript is trusted like the app's own. That is acceptable because it is software you installed locally. Do not proxy anything you do not trust this way.
 
-### Single password
-There are no per-user accounts. Sessions are stateless and cannot be revoked one by one; rotate the password to revoke all of them.
+### Single PIN
+There are no per-user accounts. Sessions are stateless and cannot be revoked one by one; change the PIN or run `npm run setup -- --rotate` to revoke all of them.

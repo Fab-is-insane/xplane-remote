@@ -84,6 +84,17 @@ describe('host and origin checks', () => {
     expect(isAllowedHost(undefined, allowed)).toBe(false);
   });
 
+  it('allows Tailscale IPs via a CIDR entry, nothing else', () => {
+    const ts = [...allowed, '100.64.0.0/10'];
+    expect(isAllowedHost('100.124.45.38:8787', ts)).toBe(true);
+    expect(isAllowedHost('100.64.0.1', ts)).toBe(true);
+    expect(isAllowedHost('100.127.255.255', ts)).toBe(true);
+    expect(isAllowedHost('100.128.0.1:8787', ts)).toBe(false);
+    expect(isAllowedHost('192.168.1.20:8787', ts)).toBe(false);
+    expect(isAllowedHost('100.124.45.38.evil.com', ts)).toBe(false);
+    expect(isAllowedHost('100.124.45.38:8787', allowed)).toBe(false);
+  });
+
   it('requires Origin to match the requested host', () => {
     expect(isSameOrigin({ host: 'pc.tail.ts.net', origin: 'https://pc.tail.ts.net' })).toBe(true);
     expect(isSameOrigin({ host: 'pc.tail.ts.net:443', origin: 'https://pc.tail.ts.net' })).toBe(true);
@@ -91,5 +102,16 @@ describe('host and origin checks', () => {
     expect(isSameOrigin({ host: 'pc.tail.ts.net', origin: 'https://evil.example.com' })).toBe(false);
     expect(isSameOrigin({ host: 'pc.tail.ts.net', origin: 'null' })).toBe(false);
     expect(isSameOrigin({ host: 'pc.tail.ts.net' })).toBe(true); // non-browser client; still needs a session
+  });
+});
+
+describe('PIN configuration', () => {
+  it('accepts a 4-digit PIN and rejects shorter ones', async () => {
+    const { loadConfig, ConfigError } = await import('../src/config.js');
+    expect(loadConfig({ APP_PASSWORD: '5463', SESSION_SECRET: 's'.repeat(40) }).appPassword).toBe('5463');
+    expect(() => loadConfig({ APP_PASSWORD: '123', SESSION_SECRET: 's'.repeat(40) })).toThrow(ConfigError);
+    const s = new SessionManager('5463', SECRET, 60_000);
+    expect(s.checkPassword('5463')).toBe(true);
+    expect(s.checkPassword('5464')).toBe(false);
   });
 });

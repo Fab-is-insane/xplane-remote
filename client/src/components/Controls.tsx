@@ -33,8 +33,8 @@ export function Controls({ state, live, onUnauthorized }: Props) {
         const word = r.paused ? 'PAUSED' : 'RUNNING';
         setFeedback(
           r.result === 'already'
-            ? { tone: 'info', text: `Already ${word.toLowerCase()} — X-Plane confirmed, no command sent.` }
-            : { tone: 'good', text: `X-Plane confirmed ${word} at ${fmtClock(r.confirmedAt)} (${(r.elapsedMs / 1000).toFixed(1)} s).` },
+            ? { tone: 'info', text: `already ${word} // verified, no command sent` }
+            : { tone: 'good', text: `${fmtClock(r.confirmedAt)} ACK sim/time/paused=${r.paused ? 1 : 0} → ${word} (${(r.elapsedMs / 1000).toFixed(1)}s)` },
         );
       } else {
         setFeedback({ tone: 'bad', text: r.message });
@@ -43,7 +43,7 @@ export function Controls({ state, live, onUnauthorized }: Props) {
       if (err instanceof UnauthorizedError) return onUnauthorized();
       setFeedback({
         tone: 'bad',
-        text: 'Could not reach the server, so the result is unknown. Check the simulator status above before trying again.',
+        text: 'host unreachable // result unknown. Check the sim status above before trying again.',
       });
     } finally {
       setPending(null);
@@ -51,9 +51,9 @@ export function Controls({ state, live, onUnauthorized }: Props) {
   }
 
   const unavailableReason = !state
-    ? 'Waiting for the server…'
+    ? 'waiting for host…'
     : !live
-      ? 'Controls are disabled until live telemetry is available.'
+      ? 'controls locked // no live telemetry'
       : control && !control.available
         ? (control.reason ?? 'Pause control is unavailable.')
         : null;
@@ -62,11 +62,11 @@ export function Controls({ state, live, onUnauthorized }: Props) {
     <section className="card controls" aria-labelledby="controls-title">
       <div className="card-head">
         <h2 id="controls-title" className="card-title">
-          Remote control
+          Remote_ctl
         </h2>
         {control?.commandMode && (
           <span className="card-meta" title="X-Plane command used for pause/resume">
-            {control.commandMode === 'on_off' ? 'pause_on / pause_off' : 'pause_toggle'}
+            cmd: {control.commandMode === 'on_off' ? 'pause_on|off' : 'pause_toggle'}
           </span>
         )}
       </div>
@@ -74,7 +74,7 @@ export function Controls({ state, live, onUnauthorized }: Props) {
       <div className="control-grid">
         <ControlButton
           action="pause"
-          label="Pause"
+          label="PAUSE"
           icon={<PauseIcon className="ctl-icon" />}
           current={paused === true}
           busy={busy === 'pause'}
@@ -83,7 +83,7 @@ export function Controls({ state, live, onUnauthorized }: Props) {
         />
         <ControlButton
           action="resume"
-          label="Resume"
+          label="RESUME"
           icon={<PlayIcon className="ctl-icon" />}
           current={paused === false}
           busy={busy === 'resume'}
@@ -97,13 +97,13 @@ export function Controls({ state, live, onUnauthorized }: Props) {
           <p className={`feedback tone-${feedback.tone}`}>{feedback.text}</p>
         ) : busy ? (
           <p className="feedback tone-info">
-            {busy === 'pause' ? 'Pausing' : 'Resuming'}… waiting for X-Plane to confirm.
+            <span className="cursor">{busy === 'pause' ? 'sending pause' : 'sending resume'} // awaiting ack from X-Plane</span>
           </p>
         ) : unavailableReason ? (
           <p className="feedback tone-muted">{unavailableReason}</p>
         ) : (
           <p className="feedback tone-muted">
-            {paused ? 'Simulator is paused. Resume when you are ready.' : 'Simulator is running.'}
+            {paused ? 'sim on HOLD // resume when ready' : 'sim RUNNING // standing by'}
           </p>
         )}
       </div>
@@ -122,7 +122,7 @@ interface ButtonProps {
 }
 
 function ControlButton({ action, label, icon, current, busy, disabled, onPress }: ButtonProps) {
-  const sub = busy ? 'Waiting for X-Plane…' : current ? (action === 'pause' ? 'Currently paused' : 'Currently running') : disabled ? 'Unavailable' : action === 'pause' ? 'Freeze the sim' : 'Unfreeze the sim';
+  const sub = busy ? 'awaiting ack' : current ? 'active' : disabled ? 'locked' : action === 'pause' ? 'freeze sim' : 'release sim';
   return (
     <button
       type="button"

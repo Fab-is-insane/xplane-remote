@@ -105,9 +105,9 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
 
   const xplaneMock = bool('XPLANE_MOCK', false);
 
-  const appPassword = env.APP_PASSWORD ?? '';
-  if (appPassword.length < 12) {
-    problems.push('APP_PASSWORD must be set and at least 12 characters long (run `npm run setup`)');
+  const appPassword = (env.APP_PASSWORD ?? '').trim();
+  if (appPassword.length < 4) {
+    problems.push('APP_PASSWORD must be set and at least 4 characters long (run `npm run setup`)');
   }
   const sessionSecret = env.SESSION_SECRET ?? '';
   if (sessionSecret.length < 32) {
@@ -124,7 +124,7 @@ export function loadConfig(env: Env = process.env, overrides: Partial<AppConfig>
     problems.push(`COOKIE_SECURE must be auto, always or never (got "${cookieSecure}")`);
   }
 
-  const allowedHosts = str('ALLOWED_HOSTS', 'localhost,127.0.0.1,::1,*.ts.net')
+  const allowedHosts = str('ALLOWED_HOSTS', 'localhost,127.0.0.1,::1,*.ts.net,100.64.0.0/10')
     .split(',')
     .map((h) => h.trim().toLowerCase())
     .filter(Boolean);

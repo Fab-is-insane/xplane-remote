@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import { UnauthorizedError, getWebFmcStatus, type WebFmcStatus } from '../api';
-import { ChevronIcon, ExternalIcon, RefreshIcon, Spinner } from './Icons';
+import { ExternalIcon, RefreshIcon, Spinner } from './Icons';
 
 const OPEN_KEY = 'xpr.webfmc.open';
 
+// Default: open on wide screens, collapsed on phones (the CDU is tall).
 function readOpen(): boolean {
+  const wide = typeof window !== 'undefined' && window.matchMedia('(min-width: 960px)').matches;
   try {
     const v = localStorage.getItem(OPEN_KEY);
-    return v === null ? true : v === '1';
+    return v === null ? wide : v === '1';
   } catch {
-    return true;
+    return wide;
   }
 }
 
@@ -69,7 +71,9 @@ export function WebFmcPanel({ onUnauthorized }: { onUnauthorized: () => void }) 
           <h2 id="webfmc-title" className="card-title">
             WebFMC
           </h2>
-          <ChevronIcon className="chev" />
+          <span className="collapse-state" aria-hidden="true">
+            {open ? '[-]' : '[+]'}
+          </span>
         </button>
         <div className="card-actions">
           {usable && (
@@ -101,7 +105,7 @@ export function WebFmcPanel({ onUnauthorized }: { onUnauthorized: () => void }) 
           <div className="fmc-fallback">
             {!status && !error ? (
               <p className="feedback tone-muted">
-                <Spinner className="inline-spin" /> Checking WebFMC…
+                <span className="cursor">probing webfmc on :9090</span>
               </p>
             ) : (
               <>
@@ -109,21 +113,21 @@ export function WebFmcPanel({ onUnauthorized }: { onUnauthorized: () => void }) 
                 <div className="btn-row">
                   <button type="button" className="btn" onClick={() => void check()} disabled={checking}>
                     {checking ? <Spinner className="inline-spin" /> : <RefreshIcon className="icon" />}
-                    Check again
+                    retry
                   </button>
                   {status?.reachable && (
                     <a className="btn" href={status.proxyPath} target="_blank" rel="noopener">
-                      <ExternalIcon className="icon" /> Open via app
+                      <ExternalIcon className="icon" /> open via app
                     </a>
                   )}
                   {status?.directUrl && (
                     <a className="btn" href={status.directUrl} target="_blank" rel="noopener noreferrer">
-                      <ExternalIcon className="icon" /> Open WebFMC directly
+                      <ExternalIcon className="icon" /> open direct
                     </a>
                   )}
                 </div>
                 {!status?.directUrl && status?.reachable === false && status.enabled && (
-                  <p className="hint">Tip: set WEBFMC_DIRECT_URL in .env to show a direct link here as a fallback.</p>
+                  <p className="hint">set WEBFMC_DIRECT_URL in .env to show a direct link here as a fallback</p>
                 )}
               </>
             )}

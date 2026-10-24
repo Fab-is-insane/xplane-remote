@@ -26,7 +26,7 @@ export function deriveLinkStatus(
   const serverSilent = receivedAt === null || now - receivedAt > SERVER_SILENCE_MS || (stream !== 'open' && now - receivedAt > 2000);
   if (!state || serverSilent) {
     return {
-      label: state ? 'Server offline' : 'Connecting',
+      label: state ? 'Host down' : 'Handshake',
       tone: state ? 'bad' : 'muted',
       detail: state
         ? 'Lost contact with X-Plane Remote on your PC (PC asleep, app stopped, or Tailscale disconnected). Values below are not live.'
@@ -36,9 +36,9 @@ export function deriveLinkStatus(
   }
   switch (state.link) {
     case 'disconnected':
-      return { label: 'Sim offline', tone: 'bad', detail: state.linkDetail ?? 'X-Plane is not reachable.', live: false };
+      return { label: 'Sim down', tone: 'bad', detail: state.linkDetail ?? 'X-Plane is not reachable.', live: false };
     case 'connecting':
-      return { label: 'Connecting', tone: 'warn', detail: state.linkDetail ?? 'Connecting to X-Plane…', live: false };
+      return { label: 'Handshake', tone: 'warn', detail: state.linkDetail ?? 'Connecting to X-Plane…', live: false };
     case 'no_flight':
       return { label: 'No flight', tone: 'warn', detail: state.linkDetail ?? 'X-Plane is running but no flight is loaded.', live: false };
     case 'connected':

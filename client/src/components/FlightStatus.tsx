@@ -21,51 +21,65 @@ export function FlightStatus({ state, live, ageMs }: Props) {
     <section className={`card flight${stale ? ' is-stale' : ''}`} aria-labelledby="flight-title">
       <div className="card-head">
         <h2 id="flight-title" className="card-title">
-          Flight status
+          Telemetry
         </h2>
-        {stale ? <span className="chip tone-warn">STALE</span> : !t?.lastUpdate ? <span className="chip tone-muted">NO DATA</span> : null}
+        {stale ? <span className="chip tone-warn">STALE</span> : !t?.lastUpdate ? <span className="chip tone-bad">NO SIGNAL</span> : null}
       </div>
-      {aircraft && <p className="aircraft">{aircraft}</p>}
+      {aircraft && (
+        <p className="aircraft">
+          <span className="aircraft-key">subject:</span> {aircraft}
+        </p>
+      )}
 
       <TodPanel tod={tod ?? null} gsKt={t?.groundspeedKt ?? null} />
 
       <dl className="tiles">
-        <Tile label="Altitude" value={fmtInt(t?.altitudeFt ?? null)} unit="ft" hint={flightLevel(t?.altitudeFt ?? null) ?? 'indicated'} wide />
-        <Tile label="Ground speed" value={fmtInt(t?.groundspeedKt ?? null)} unit="kt" />
+        <Tile label="ALT_IND" value={fmtInt(t?.altitudeFt ?? null)} unit="ft" hint={flightLevel(t?.altitudeFt ?? null) ?? 'indicated'} wide />
+        <Tile label="GS" value={fmtInt(t?.groundspeedKt ?? null)} unit="kt" />
         <Tile label="IAS" value={fmtInt(t?.iasKt ?? null)} unit="kt" />
         <Tile
-          label="Vertical speed"
+          label="V/S"
           value={fmtSigned(vs)}
           unit="fpm"
-          hint={vs === null ? undefined : vsTrend === 'level' ? 'level' : vsTrend === 'up' ? 'climbing' : 'descending'}
+          hint={vs === null ? undefined : vsTrend === 'level' ? 'lvl' : vsTrend === 'up' ? 'clb ↑' : 'des ↓'}
         />
-        <Tile label="Heading" value={t?.headingMagDeg == null ? DASH : `${fmtHeading(t.headingMagDeg)}°`} unit="mag" />
+        <Tile label="HDG" value={t?.headingMagDeg == null ? DASH : `${fmtHeading(t.headingMagDeg)}°`} unit="mag" />
       </dl>
 
       <p className="updated" aria-live="off">
         {t?.lastUpdate ? (
           <>
-            Updated <strong>{fmtAge(ageMs)}</strong> <span className="dim">({fmtClock(t.lastUpdate)})</span>
+            last packet <strong>{fmtAge(ageMs)}</strong> <span className="dim">[{fmtClock(t.lastUpdate)}]</span>
           </>
         ) : (
-          'No telemetry received from X-Plane yet.'
+          'no packets received from X-Plane yet'
         )}
       </p>
 
       <details className="details">
-        <summary>Position &amp; details</summary>
+        <summary>sys info // position, link, datarefs</summary>
         <dl className="kv">
-          <dt>Latitude</dt>
+          <dt>lat</dt>
           <dd>{fmtLat(t?.latitude ?? null)}</dd>
-          <dt>Longitude</dt>
+          <dt>lon</dt>
           <dd>{fmtLon(t?.longitude ?? null)}</dd>
-          <dt>True altitude (MSL)</dt>
+          <dt>alt_msl</dt>
           <dd>{t?.trueAltitudeFt == null ? DASH : `${fmtInt(t.trueAltitudeFt)} ft`}</dd>
-          <dt>X-Plane</dt>
+          <dt>link</dt>
+          <dd>{state?.link ?? DASH}</dd>
+          <dt>packet age</dt>
+          <dd>{ageMs === null ? DASH : `${Math.round(ageMs)} ms`}</dd>
+          <dt>pause cmd</dt>
+          <dd className="mono-sm">
+            {state?.control.commandMode === 'on_off' ? 'sim/operation/pause_on|off' : state?.control.commandMode === 'toggle' ? 'sim/operation/pause_toggle' : DASH}
+          </dd>
+          <dt>state ref</dt>
+          <dd className="mono-sm">sim/time/paused</dd>
+          <dt>x-plane</dt>
           <dd>{state?.xplaneVersion ?? DASH}</dd>
-          <dt>Web API</dt>
+          <dt>web_api</dt>
           <dd>{state?.apiVersion ?? DASH}</dd>
-          <dt>T/D source</dt>
+          <dt>t/d src</dt>
           <dd className="mono-sm">{tod?.source ?? DASH}</dd>
         </dl>
       </details>
@@ -90,7 +104,7 @@ function TodPanel({ tod, gsKt }: { tod: PublicState['tod'] | null; gsKt: number 
   if (!tod) {
     return (
       <div className="tod tone-muted">
-        <span className="tod-label">Top of descent</span>
+        <span className="tod-label">T/D</span>
         <span className="tod-value">{DASH}</span>
       </div>
     );
@@ -104,27 +118,27 @@ function TodPanel({ tod, gsKt }: { tod: PublicState['tod'] | null; gsKt: number 
       value = fmtNm(tod.distanceNm);
       unit = 'NM';
       tone = (tod.distanceNm ?? 99) <= 10 ? 'warn' : 'accent';
-      note = [fmtEta(tod.distanceNm, gsKt) ? `${fmtEta(tod.distanceNm, gsKt)} at current GS` : null, 'along route (Zibo FMC)']
+      note = [fmtEta(tod.distanceNm, gsKt) ? `${fmtEta(tod.distanceNm, gsKt)} @ current GS` : null, 'along route // zibo fmc']
         .filter(Boolean)
         .join(' · ');
       break;
     case 'passed':
-      value = 'Passed';
+      value = 'PASSED';
       tone = 'good';
       if (tod.distanceNm) note = `${fmtNm(tod.distanceNm)} NM past T/D`;
       break;
     case 'calculating':
-      value = 'Calculating';
+      value = 'CALC…';
       break;
     case 'no_td':
-      value = 'No T/D';
+      value = 'NO T/D';
       break;
     default:
       value = DASH;
   }
   return (
     <div className={`tod tone-${tone}`} role="group" aria-label="Distance to top of descent">
-      <span className="tod-label">To T/D</span>
+      <span className="tod-label">DIST T/D</span>
       <span className="tod-value">
         <span className="num">{value}</span>
         {unit && <span className="unit">{unit}</span>}

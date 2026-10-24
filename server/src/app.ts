@@ -140,7 +140,7 @@ export async function buildApp(opts: BuildAppOptions): Promise<BuiltApp> {
         loginThrottle.recordFailure();
         log.warn(`Failed sign-in attempt${tailnetUser(req)}`);
         await new Promise((r) => setTimeout(r, 400)); // slow down guessing
-        return sendError(reply, 401, 'bad_password', 'Incorrect password.');
+        return sendError(reply, 401, 'bad_password', 'Incorrect PIN.');
       }
       loginThrottle.recordSuccess();
       const { token, expiresAt } = sessions.issue();
@@ -255,7 +255,18 @@ export async function buildApp(opts: BuildAppOptions): Promise<BuiltApp> {
   const dist = opts.clientDist ?? null;
   const hasClient = Boolean(dist && existsSync(join(dist, 'index.html')));
   if (hasClient && dist) {
-    await app.register(fastifyStatic, { root: dist, index: ['index.html'], wildcard: false, maxAge: '1h' });
+    await app.register(fastifyStatic, {
+      root: dist,
+      index: ['index.html'],
+      // Look files up per request, so a rebuild is picked up without a restart.
+      wildcard: true,
+      // Vite assets are content-hashed and can be cached; HTML and other
+      // unhashed files must revalidate so phones pick up new builds.
+      cacheControl: false,
+      setHeaders: (res, filePath) => {
+        res.header('Cache-Control', /[\\/]assets[\\/]/.test(filePath) ? 'public, max-age=31536000, immutable' : 'no-cache');
+      },
+    });
   }
 
   app.setNotFoundHandler((req, reply) => {

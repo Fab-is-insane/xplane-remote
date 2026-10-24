@@ -72,11 +72,11 @@ cd "$env:USERPROFILE\OneDrive\Documents\GitHub\xplane-remote"
 # 2. Install dependencies (client + server)
 npm install
 
-# 3. Create .env with a generated password and session secret
+# 3. Create .env (sign-in PIN 5463 + a generated session secret)
 npm run setup
 ```
 
-`npm run setup` prints your **password** once. It is stored in `.env`, which git ignores. Keep it; you type it on the phone.
+The sign-in **PIN** defaults to `5463` (`APP_PASSWORD` in `.env`, which git ignores). Change it there if you like.
 Open `.env` in an editor to review the other settings. The defaults match this PC. All options are documented in [`.env.example`](.env.example).
 
 ## 4. Development commands
@@ -143,20 +143,25 @@ Set `WEBFMC_ENABLED=false` to hide the panel completely.
 
 Tailscale Serve publishes the app **only to devices in your tailnet**, with HTTPS and a real certificate. Do **not** use `tailscale funnel` (public internet), and do not port-forward on your router.
 
-**One-time tailnet setting:** in the Tailscale admin console → **DNS**, make sure **MagicDNS** is on and **HTTPS Certificates** is enabled. If it is not, the command below prints a link to enable it.
-
 Run in PowerShell on the PC while the app is running (`npm start`):
 
 ```powershell
 # Confirm Tailscale is signed in and connected
 tailscale status
 
-# Publish http://127.0.0.1:8787 as https://<this-pc>.<tailnet>.ts.net (tailnet only)
-tailscale serve --bg 8787
+# Forward port 8787 on this PC's Tailscale address to the app (tailnet only)
+tailscale serve --bg --tcp=8787 tcp://127.0.0.1:8787
 
-# Show what is being served and the exact URL
+# Show what is being served
 tailscale serve status
 ```
+
+The dashboard is then at **`http://<tailscale-ip>:8787`** (on this PC: `http://100.124.45.38:8787`), or `http://desktop-gi30sno-1:8787`.
+It is plain HTTP inside the tailnet, but Tailscale's WireGuard tunnel encrypts it end to end.
+The `100.64.0.0/10` entry in `ALLOWED_HOSTS` lets the app answer to Tailscale IPs. TCP mode is used because Serve's HTTP mode ignores requests addressed by IP.
+
+**Optional HTTPS instead:** enable *HTTPS Certificates* in the admin console (DNS page). Then replace the TCP forward with
+`tailscale serve --tcp=8787 off; tailscale serve --bg 8787` and open `https://desktop-gi30sno-1.tailfae815.ts.net`.
 
 If the command says *access denied*, run it once from an **administrator** PowerShell, or sign in to the Tailscale app on the PC as the same Windows user.
 `--bg` keeps serving after you close the terminal **and after reboots** until you remove it ([§14](#14-stopping-and-revoking-access)).
@@ -168,15 +173,12 @@ If the command says *access denied*, run it once from an **administrator** Power
 # → e.g. my-pc.tail1234.ts.net
 ```
 
-The dashboard URL is then `https://my-pc.tail1234.ts.net`.
-
-> When I set this up, the Tailscale CLI on this PC reported `BackendState: NoState` ("Tailscale is starting"), so I could not read the MagicDNS name or test Serve. Run the commands above once Tailscale shows as connected.
 
 ## 10. Using it from your phone
 
 1. Turn Tailscale **on** on the phone (same account/tailnet as the PC).
-2. Open `https://<your-pc>.<tailnet>.ts.net` in Chrome or Safari.
-3. Enter the password from `npm run setup`. The session lasts 30 days on that device (`SESSION_TTL_HOURS`).
+2. Open `http://100.124.45.38:8787` in Chrome or Safari.
+3. Enter the PIN (`5463` by default). The session lasts 30 days on that device (`SESSION_TTL_HOURS`).
 4. Optional: *Add to Home Screen* for an app-like icon.
 
 What the header tells you:
@@ -193,11 +195,11 @@ What the header tells you:
 
 ## 11. Authentication
 
-- **Password** (`APP_PASSWORD`, ≥12 chars) is checked with a constant-time comparison. On success the server sets an **HttpOnly, SameSite=Strict** session cookie, marked *Secure* when the request came through Tailscale Serve's HTTPS. The cookie is HMAC-signed with a key derived from `SESSION_SECRET` **and** the password.
+- **PIN** (`APP_PASSWORD`, default `5463`, min 4 chars) is checked with a constant-time comparison. A short PIN is acceptable because the app is reachable only from your own tailnet (it listens on 127.0.0.1, so the hostel LAN cannot reach it), and guessing is rate-limited below. On success the server sets an **HttpOnly, SameSite=Strict** session cookie, marked *Secure* when the request came through Tailscale Serve's HTTPS. The cookie is HMAC-signed with a key derived from `SESSION_SECRET` **and** the PIN.
 - **Everything** except `/api/health` and the login endpoint needs a session: telemetry, the stream, pause/resume, and the WebFMC proxy (WebFMC buttons can change the FMC).
-- 10 wrong passwords within 10 minutes lock sign-in for 10 minutes.
+- 10 wrong PINs within 10 minutes lock sign-in for 10 minutes.
 - State-changing requests must also be same-origin and carry a custom header, and the server answers only to `localhost`, `127.0.0.1` and `*.ts.net` host names.
-- To set your own password: edit `APP_PASSWORD` in `.env` and restart `npm start`. All devices are signed out.
+- To change the PIN: edit `APP_PASSWORD` in `.env` and restart `npm start`. All devices are signed out.
 
 More: [docs/SECURITY.md](docs/SECURITY.md).
 
@@ -218,11 +220,11 @@ tailscale serve status
 
 ## 13. Known limitations
 
-- **Not yet tested against a running X-Plane.** X-Plane was not running while this was built. All X-Plane behaviour is covered by tests against a fake Web API that follows the official documentation, and names/types were checked against this install's `DataRefs.txt`/`Commands.txt`. On your first live session, check that pause/resume confirms and that T/D matches the FMC.
+- **Live-verified so far (2026-10-24, X-Plane 12.4.3, Zibo at the gate):** API v3 detection, discovery of every dataref/command by name, WebSocket telemetry, the Zibo T/D datarefs (reported *No T/D* with no route), and the WebFMC proxy (connects exactly like direct WebFMC). **Not yet verified live:** pause/resume confirmation and a T/D distance in flight. These are covered by tests against a fake Web API that follows the official documentation.
 - **T/D** relies on Zibo-internal datarefs (verified in the Zibo **4.05.33** source). A future Zibo update could rename or change them; the card then shows "—" rather than a wrong number.
 - **WebFMC embedding** depends on WebFMC 2.4.1's client code (see §8). Other versions fall back to *Open directly*. WebFMC's own "check for updates" request is blocked when it runs inside the HTTPS page (harmless).
 - **Toggle fallback:** only if `pause_on/off` are unavailable (or `PAUSE_COMMAND_MODE=toggle`). Someone pressing pause at the PC at exactly the same moment could then race the toggle; the result is still read back and reported truthfully.
-- **Single shared password**, no per-user accounts. Sessions cannot be revoked one by one; changing the password signs out all devices.
+- **Single shared PIN**, no per-user accounts. Sessions cannot be revoked one by one; changing the PIN or rotating the session secret signs out all devices.
 - If X-Plane freezes (e.g. a long scenery load), telemetry goes **stale** and controls are disabled until it answers again.
 
 ## 14. Stopping and revoking access
@@ -231,11 +233,11 @@ tailscale serve status
 # Stop the app: press Ctrl+C in the window running `npm start`.
 
 # Stop publishing it to your tailnet (immediately, survives reboot):
-tailscale serve --https=443 off
+tailscale serve --tcp=8787 off
 # …or remove ALL serve configuration on this PC:
 tailscale serve reset
 
-# Sign out every phone/browser (new password + secret), then restart the app:
+# Sign out every phone/browser (new session secret), then restart the app:
 npm run setup -- --rotate
 ```
 

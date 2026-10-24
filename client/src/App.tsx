@@ -3,7 +3,6 @@ import { getSession, logout, useLiveState, useNow } from './api';
 import { Controls } from './components/Controls';
 import { FlightStatus } from './components/FlightStatus';
 import { Header } from './components/Header';
-import { Spinner } from './components/Icons';
 import { Login } from './components/Login';
 import { WebFmcPanel } from './components/WebFmcPanel';
 import { deriveLinkStatus } from './status';
@@ -26,18 +25,17 @@ export function App() {
   if (auth === 'checking') {
     return (
       <main className="splash">
-        <Spinner className="splash-spin" />
-        <span>Connecting…</span>
+        <span className="cursor">&gt; establishing uplink</span>
       </main>
     );
   }
   if (auth === 'offline') {
     return (
       <main className="splash">
-        <p className="feedback tone-bad">Cannot reach X-Plane Remote on your PC.</p>
-        <p className="hint">Check that the app is running on the PC and that Tailscale is connected on this phone.</p>
+        <p className="feedback tone-bad">host unreachable // X-Plane Remote is not answering</p>
+        <p className="hint">is the app running on the PC, and is Tailscale on for this phone?</p>
         <button type="button" className="btn" onClick={() => { setAuth('checking'); checkSession(); }}>
-          Try again
+          retry
         </button>
       </main>
     );
@@ -63,7 +61,7 @@ function Dashboard({ onUnauthorized }: { onUnauthorized: () => void }) {
     <div className="app">
       {state?.source === 'mock' && (
         <div className="mock-banner" role="alert">
-          MOCK DATA — development simulator. Nothing here is live X-Plane data.
+          !! SIMULATED FEED — MOCK DATA, NOT LIVE X-PLANE !!
         </div>
       )}
       <Header link={link} paused={paused} onSignOut={signOut} />
@@ -82,7 +80,7 @@ function Dashboard({ onUnauthorized }: { onUnauthorized: () => void }) {
         </div>
       </main>
       <footer className="foot">
-        Private to your tailnet · actions are confirmed by X-Plane before they are reported
+        tailnet only // every action verified against sim/time/paused // leave no trace
       </footer>
     </div>
   );

@@ -14,18 +14,47 @@ export function hostnameOf(hostHeader: string | undefined): string | null {
   return colon >= 0 ? h.slice(0, colon) : h;
 }
 
-/** Match against ALLOWED_HOSTS entries; "*.ts.net" matches any subdomain of ts.net. */
+/**
+ * Match against ALLOWED_HOSTS entries:
+ *   "*.ts.net"       any subdomain of ts.net (MagicDNS names)
+ *   "100.64.0.0/10"  any IPv4 address in that range (Tailscale IPs)
+ *   anything else    exact host name / IP
+ */
 export function isAllowedHost(hostHeader: string | undefined, allowed: readonly string[]): boolean {
   const name = hostnameOf(hostHeader);
   if (!name) return false;
   return allowed.some((pattern) => {
     const p = pattern.replace(/^\[|\]$/g, '');
+    if (p.includes('/')) return ipv4InCidr(name, p);
     if (p.startsWith('*.')) {
       const suffix = p.slice(1); // ".ts.net"
       return name.endsWith(suffix) && name.length > suffix.length;
     }
     return name === p;
   });
+}
+
+function ipv4ToInt(ip: string): number | null {
+  const parts = ip.split('.');
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const v = Number(part);
+    if (v > 255) return null;
+    n = n * 256 + v;
+  }
+  return n;
+}
+
+function ipv4InCidr(ip: string, cidr: string): boolean {
+  const [base, bitsStr] = cidr.split('/');
+  const bits = Number(bitsStr);
+  const ipN = ipv4ToInt(ip);
+  const baseN = base === undefined ? null : ipv4ToInt(base);
+  if (ipN === null || baseN === null || !Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  const size = 2 ** (32 - bits);
+  return Math.floor(ipN / size) === Math.floor(baseN / size);
 }
 
 /**
