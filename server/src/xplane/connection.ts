@@ -20,6 +20,7 @@ import {
   normaliseValue,
   type DatarefSpec,
   type TelemetryKey,
+  type TelemetryValue,
 } from './datarefs.js';
 import {
   XPlaneApiError,
@@ -71,7 +72,7 @@ export class XPlaneConnection implements SimSource {
 
   private readonly refs = new Map<TelemetryKey, ResolvedRef>();
   private readonly idToKey = new Map<number, TelemetryKey>();
-  private readonly values = new Map<TelemetryKey, number | string>();
+  private readonly values = new Map<TelemetryKey, TelemetryValue>();
   private readonly commands = new Map<string, CommandInfo>();
   private readonly typeWarnings = new Set<string>();
   private lastContactAt: number | null = null;
@@ -476,7 +477,7 @@ export class XPlaneConnection implements SimSource {
 
   // ------------------------------------------------------- helpers
 
-  private setValue(key: TelemetryKey, value: number | string) {
+  private setValue(key: TelemetryKey, value: TelemetryValue) {
     if (this.values.get(key) !== value) {
       this.values.set(key, value);
       this.emitChange();

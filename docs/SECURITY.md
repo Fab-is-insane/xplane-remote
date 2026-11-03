@@ -41,6 +41,7 @@ Browser on the PC ────────────────────�
 
 **Least privilege towards X-Plane**
 - The only simulator actions in the code are `sim/operation/pause_on`, `pause_off` and `pause_toggle`. They are allow-listed in `datarefs.ts` and checked again before activation.
+- FlightFactor 777 support only **reads** datarefs (CDU screen text, colours, sizes). The CDU mirror is read-only, and no FF777 CDU key commands are allow-listed.
 - **No dataref is ever written.** There is no endpoint that accepts a command name, dataref name, URL or port. The tests assert that generic routes like `/api/command` do not exist.
 - Upstream URLs (`XPLANE_API_URL`, `WEBFMC_URL`) must be loopback `http://` origins without a path; anything else fails at start-up. The proxy cannot be pointed elsewhere at runtime.
 

@@ -1,9 +1,9 @@
 // Thin client for the X-Plane Remote server API plus the live-state hook.
 
 import { useEffect, useRef, useState } from 'react';
-import type { PauseAction, PauseResponse, PublicState, SessionInfo, WebFmcStatus } from '../../server/src/shared/api-types';
+import type { CduMirror, CduScreen, PauseAction, PauseResponse, PublicState, SessionInfo, WebFmcStatus } from '../../server/src/shared/api-types';
 
-export type { PauseAction, PauseResponse, PublicState, SessionInfo, WebFmcStatus };
+export type { CduMirror, CduScreen, PauseAction, PauseResponse, PublicState, SessionInfo, WebFmcStatus };
 
 export class UnauthorizedError extends Error {}
 
@@ -76,6 +76,8 @@ export interface LiveState {
   stream: StreamStatus;
   /** Client clock (ms) when the last state message arrived. */
   receivedAt: number | null;
+  /** FF777 CDU screens (separate `cdu` event, sent only when a screen changes). */
+  cdu: CduMirror | null;
 }
 
 /**
@@ -84,7 +86,7 @@ export interface LiveState {
  * expired and otherwise retry.
  */
 export function useLiveState(enabled: boolean, onUnauthorized: () => void): LiveState {
-  const [live, setLive] = useState<LiveState>({ state: null, stream: 'connecting', receivedAt: null });
+  const [live, setLive] = useState<LiveState>({ state: null, stream: 'connecting', receivedAt: null, cdu: null });
   const unauthorizedRef = useRef(onUnauthorized);
   unauthorizedRef.current = onUnauthorized;
 
@@ -100,7 +102,22 @@ export function useLiveState(enabled: boolean, onUnauthorized: () => void): Live
       es.addEventListener('state', (e) => {
         try {
           const state = JSON.parse((e as MessageEvent<string>).data) as PublicState;
-          setLive({ state, stream: 'open', receivedAt: Date.now() });
+          setLive((l) => ({ ...l, state, stream: 'open', receivedAt: Date.now() }));
+        } catch {
+          /* ignore malformed frame */
+        }
+      });
+      es.addEventListener('cdu', (e) => {
+        try {
+          const msg = JSON.parse((e as MessageEvent<string>).data) as CduMirror | null;
+          setLive((l) => {
+            if (!msg) return { ...l, cdu: null };
+            if (!msg.partial || !l.cdu) return { ...l, cdu: msg };
+            // Partial update: replace only the screens that changed.
+            const bySide = new Map(l.cdu.screens.map((s) => [s.side, s]));
+            for (const s of msg.screens) bySide.set(s.side, s);
+            return { ...l, cdu: { ...l.cdu, screens: [...bySide.values()].sort((a, b) => 'LCR'.indexOf(a.side) - 'LCR'.indexOf(b.side)) } };
+          });
         } catch {
           /* ignore malformed frame */
         }

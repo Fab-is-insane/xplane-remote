@@ -4,9 +4,19 @@
 //
 // Names, types and units were checked against X-Plane 12.4.3's
 // Resources/plugins/DataRefs.txt and Commands.txt, and the Zibo 737 (4.05.33)
-// datarefs against plugins/xlua/scripts/B738.a_fms/B738.a_fms.lua.
+// datarefs against plugins/xlua/scripts/B738.a_fms/B738.a_fms.lua, and the
+// FlightFactor 777v2 CDU datarefs against its docs/cduDatarefs.txt and the
+// live sim.
 
-export type DatarefKind = 'number' | 'string';
+/**
+ * - number:   scalar int/float/double
+ * - string:   byte array decoded as text, cut at the first NUL (names, ICAO codes)
+ * - screen:   byte array decoded at full length, NUL → space (CDU screen text)
+ * - intArray: int array (CDU colours / sizes)
+ */
+export type DatarefKind = 'number' | 'string' | 'screen' | 'intArray';
+
+export type TelemetryValue = number | string | number[];
 
 export type TelemetryKey =
   | 'paused'
@@ -27,7 +37,18 @@ export type TelemetryKey =
   | 'ziboFlightPhase'
   | 'ziboDestDist'
   | 'ziboDestEta'
-  | 'ziboDestIcao';
+  | 'ziboDestIcao'
+  | 'ffCduLines'
+  | 'ffCduCols'
+  | 'ffCduL'
+  | 'ffCduC'
+  | 'ffCduR'
+  | 'ffCduLColor'
+  | 'ffCduCColor'
+  | 'ffCduRColor'
+  | 'ffCduLSize'
+  | 'ffCduCSize'
+  | 'ffCduRSize';
 
 export interface DatarefSpec {
   key: TelemetryKey;
@@ -41,11 +62,12 @@ export interface DatarefSpec {
 }
 
 // value_type strings reported by the Web API that we accept for each kind.
-// Scalar only: array types are rejected so a changed dataref can't feed
-// garbage into the UI.
+// Anything else is rejected so a changed dataref can't feed garbage into the UI.
 export const ACCEPTED_VALUE_TYPES: Record<DatarefKind, readonly string[]> = {
   number: ['int', 'float', 'double'],
   string: ['data'],
+  screen: ['data'],
+  intArray: ['int_array'],
 };
 
 export const DATAREFS: readonly DatarefSpec[] = [
@@ -81,6 +103,24 @@ export const DATAREFS: readonly DatarefSpec[] = [
   // Zibo FMC: its own predicted arrival time, "HHMM" in sim Zulu time ("" when unknown).
   { key: 'ziboDestEta', name: 'laminar/B738/FMS/time_dest', kind: 'string', group: 'aircraft', unit: 'HHMM' },
   { key: 'ziboDestIcao', name: 'laminar/B738/fms/dest_icao', kind: 'string', group: 'aircraft', unit: 'text' },
+
+  // FlightFactor 777v2 (docs/cduDatarefs.txt). Its FMC exposes no route/T/D/ETA
+  // datarefs, but it publishes the exact text of each CDU screen (left, centre,
+  // right): 14 lines × 24 chars, plus per-character colour and size. T/D and
+  // destination ETA are read from whichever CDU shows PROGRESS page 1.
+  { key: 'ffCduLines', name: '1-sim/cduL/display/numOfLines', kind: 'number', group: 'aircraft', unit: 'lines' },
+  { key: 'ffCduCols', name: '1-sim/cduL/display/numOfSymbolsInLine', kind: 'number', group: 'aircraft', unit: 'chars' },
+  { key: 'ffCduL', name: '1-sim/cduL/display/symbols', kind: 'screen', group: 'aircraft', unit: 'text' },
+  { key: 'ffCduC', name: '1-sim/cduC/display/symbols', kind: 'screen', group: 'aircraft', unit: 'text' },
+  { key: 'ffCduR', name: '1-sim/cduR/display/symbols', kind: 'screen', group: 'aircraft', unit: 'text' },
+  // 1 white, 2 magenta, 3 green, 4 cyan, 5 grey, 6 blue
+  { key: 'ffCduLColor', name: '1-sim/cduL/display/symbolsColor', kind: 'intArray', group: 'aircraft', unit: 'enum[]' },
+  { key: 'ffCduCColor', name: '1-sim/cduC/display/symbolsColor', kind: 'intArray', group: 'aircraft', unit: 'enum[]' },
+  { key: 'ffCduRColor', name: '1-sim/cduR/display/symbolsColor', kind: 'intArray', group: 'aircraft', unit: 'enum[]' },
+  // 1 normal, 2 small
+  { key: 'ffCduLSize', name: '1-sim/cduL/display/symbolsSize', kind: 'intArray', group: 'aircraft', unit: 'enum[]' },
+  { key: 'ffCduCSize', name: '1-sim/cduC/display/symbolsSize', kind: 'intArray', group: 'aircraft', unit: 'enum[]' },
+  { key: 'ffCduRSize', name: '1-sim/cduR/display/symbolsSize', kind: 'intArray', group: 'aircraft', unit: 'enum[]' },
 ];
 
 export const DATAREF_BY_NAME: ReadonlyMap<string, DatarefSpec> = new Map(DATAREFS.map((d) => [d.name, d]));
@@ -110,9 +150,26 @@ export function decodeDataString(value: unknown): string | null {
   }
 }
 
+/** Decode a byte-array value at full length (NUL → space), e.g. a CDU screen. */
+export function decodeScreen(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  try {
+    return Buffer.from(value, 'base64').toString('latin1').replace(/[\x00-\x1f\x7f-\xff]/g, ' ');
+  } catch {
+    return null;
+  }
+}
+
 /** Normalise a raw Web API value according to the dataref kind. Returns null if invalid. */
-export function normaliseValue(spec: DatarefSpec, value: unknown): number | string | null {
-  if (spec.kind === 'string') return decodeDataString(value);
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  return null;
+export function normaliseValue(spec: DatarefSpec, value: unknown): TelemetryValue | null {
+  switch (spec.kind) {
+    case 'string':
+      return decodeDataString(value);
+    case 'screen':
+      return decodeScreen(value);
+    case 'intArray':
+      return Array.isArray(value) && value.length <= 4096 && value.every((x) => Number.isInteger(x)) ? (value as number[]) : null;
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  }
 }

@@ -39,10 +39,14 @@ export interface Telemetry {
   aircraftIcao: string | null;
 }
 
+/** Which aircraft-specific logic is active (decided from the datarefs that exist). */
+export type AircraftProfile = 'zibo737' | 'ff777' | 'generic';
+
 export type TodStatus =
-  | 'unavailable' // datarefs not present (not a Zibo 737, or not connected)
-  | 'no_td' // Zibo FMC has no T/D (no route / CRZ ALT / PERF INIT executed)
+  | 'unavailable' // no supported FMC data (other aircraft, or FF777 with no CDU on PROGRESS)
+  | 'no_td' // FMC has no T/D (no route / CRZ ALT / PERF INIT)
   | 'calculating' // Zibo FMC is recalculating the VNAV path
+  | 'climb' // FF777 FMC still shows T/C; T/D appears after top of climb
   | 'ahead' // T/D is ahead by distanceNm
   | 'passed'; // T/D is behind the aircraft (descent started / past T/D)
 
@@ -54,6 +58,11 @@ export interface TodInfo {
   detail: string;
   /** Dataref the value came from, for transparency. */
   source: string | null;
+  /**
+   * True when distanceNm is this app's own estimate rather than an FMC value
+   * (FF777: its FMC shows T/D only as a marker on the ND, not as a number).
+   */
+  estimated?: boolean;
 }
 
 export interface DestInfo {
@@ -70,6 +79,30 @@ export interface DestInfo {
   fmcEtaZulu: string | null;
   fmcEtaMinutes: number | null;
   detail: string;
+  /** Where the route data came from (dataref names / CDU page). */
+  source: string | null;
+}
+
+export type CduSide = 'L' | 'C' | 'R';
+
+/** One CDU screen, read-only mirror (FF777). */
+export interface CduScreen {
+  side: CduSide;
+  /** Screen text, one string per line (24 chars). */
+  lines: string[];
+  /** Per-character colour codes as digit strings: 1 white 2 magenta 3 green 4 cyan 5 grey 6 blue. */
+  colors: string[] | null;
+  /** Per-character size as digit strings: 1 normal 2 small. */
+  sizes: string[] | null;
+  isProgress: boolean;
+}
+
+/** Sent as a separate `cdu` stream event, only when a screen changes. */
+export interface CduMirror {
+  aircraft: 'ff777';
+  screens: CduScreen[];
+  /** Stream only: true = these screens replace the matching sides the client already has. */
+  partial?: boolean;
 }
 
 export type PauseAction = 'pause' | 'resume';
@@ -89,6 +122,7 @@ export interface PublicState {
   linkDetail: string | null;
   xplaneVersion: string | null;
   apiVersion: string | null;
+  profile: AircraftProfile;
   telemetry: Telemetry;
   tod: TodInfo;
   dest: DestInfo;

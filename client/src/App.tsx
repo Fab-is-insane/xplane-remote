@@ -5,6 +5,7 @@ import { FlightStatus } from './components/FlightStatus';
 import { Header } from './components/Header';
 import { Login } from './components/Login';
 import { WebFmcPanel } from './components/WebFmcPanel';
+import { CduMirror } from './components/CduMirror';
 import { deriveLinkStatus } from './status';
 
 type Auth = 'checking' | 'signed_in' | 'signed_out' | 'offline';
@@ -45,7 +46,7 @@ export function App() {
 }
 
 function Dashboard({ onUnauthorized }: { onUnauthorized: () => void }) {
-  const { state, stream, receivedAt } = useLiveState(true, onUnauthorized);
+  const { state, stream, receivedAt, cdu } = useLiveState(true, onUnauthorized);
   const now = useNow(1000);
   const link = deriveLinkStatus(state, stream, receivedAt, now);
   const paused = link.live ? (state?.telemetry.paused ?? null) : null;
@@ -76,7 +77,8 @@ function Dashboard({ onUnauthorized }: { onUnauthorized: () => void }) {
           <FlightStatus state={state} live={link.live} ageMs={ageMs} />
         </div>
         <div className="col-side">
-          <WebFmcPanel onUnauthorized={onUnauthorized} />
+          {/* WebFMC does not support the FF777, so show the CDU mirror instead. */}
+          {state?.profile === 'ff777' ? <CduMirror data={cdu} /> : <WebFmcPanel onUnauthorized={onUnauthorized} />}
         </div>
       </main>
       <footer className="foot">

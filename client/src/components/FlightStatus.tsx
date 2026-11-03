@@ -103,10 +103,18 @@ export function FlightStatus({ state, live, ageMs }: Props) {
           <dd>{state?.xplaneVersion ?? DASH}</dd>
           <dt>web_api</dt>
           <dd>{state?.apiVersion ?? DASH}</dd>
+          <dt>fmc profile</dt>
+          <dd className="mono-sm">
+            {state?.profile === 'zibo737' ? 'zibo 737 (laminar/B738 datarefs)' : state?.profile === 'ff777' ? 'ff 777v2 (1-sim cdu screens)' : (state?.profile ?? DASH)}
+          </dd>
           <dt>t/d src</dt>
           <dd className="mono-sm">{tod?.source ?? DASH}</dd>
+          <dt>t/d model</dt>
+          <dd className="mono-sm">
+            {tod?.estimated ? 'DEST DTG − (3 NM/1000 ft + 10) · est.' : tod?.source ? 'fmc value' : DASH}
+          </dd>
           <dt>dest src</dt>
-          <dd className="mono-sm">{dest?.available ? 'laminar/B738/FMS/dist_dest + time_dest' : DASH}</dd>
+          <dd className="mono-sm">{dest?.source ?? DASH}</dd>
           <dt>eta model</dt>
           <dd className="mono-sm">dist_dest ÷ GS (live) · FMC time_dest − sim zulu</dd>
         </dl>
@@ -143,10 +151,10 @@ function TodPanel({ tod, gsKt }: { tod: PublicState['tod'] | null; gsKt: number 
   let note: string | null = tod.detail;
   switch (tod.status) {
     case 'ahead':
-      value = fmtNm(tod.distanceNm);
+      value = `${tod.estimated ? '~' : ''}${fmtNm(tod.distanceNm)}`;
       unit = 'NM';
       tone = (tod.distanceNm ?? 99) <= 10 ? 'warn' : 'accent';
-      note = [fmtEta(tod.distanceNm, gsKt) ? `${fmtEta(tod.distanceNm, gsKt)} @ current GS` : null, 'along route // zibo fmc']
+      note = [fmtEta(tod.distanceNm, gsKt) ? `${fmtEta(tod.distanceNm, gsKt)} @ current GS` : null, tod.detail]
         .filter(Boolean)
         .join(' · ');
       break;
@@ -154,6 +162,10 @@ function TodPanel({ tod, gsKt }: { tod: PublicState['tod'] | null; gsKt: number 
       value = 'PASSED';
       tone = 'good';
       if (tod.distanceNm) note = `${fmtNm(tod.distanceNm)} NM past T/D`;
+      break;
+    case 'climb':
+      value = 'CLIMB';
+      tone = 'accent';
       break;
     case 'calculating':
       value = 'CALC…';
@@ -166,7 +178,7 @@ function TodPanel({ tod, gsKt }: { tod: PublicState['tod'] | null; gsKt: number 
   }
   return (
     <div className={`tod tone-${tone}`} role="group" aria-label="Distance to top of descent">
-      <span className="tod-label">DIST T/D</span>
+      <span className="tod-label">DIST T/D{tod.estimated && tod.status === 'ahead' ? ' (EST)' : ''}</span>
       <span className="tod-value">
         <span className="num">{value}</span>
         {unit && <span className="unit">{unit}</span>}

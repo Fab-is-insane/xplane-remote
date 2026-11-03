@@ -14,7 +14,7 @@ import type { AppConfig } from './config.js';
 import { LoginThrottle, SESSION_COOKIE, SessionManager, parseCookies, serializeSessionCookie } from './auth.js';
 import { APP_CSP, COMMON_SECURITY_HEADERS, RateLimiter, isAllowedHost, isHttpsRequest, isSameOrigin } from './security.js';
 import type { ApiError, PauseAction, PauseResponse, PublicState, SessionInfo } from './shared/api-types.js';
-import { buildPublicState } from './telemetry.js';
+import { FlightMemory, buildCduMirror, buildPublicState } from './telemetry.js';
 import { WEBFMC_MOUNT, WebFmcProxy } from './webfmc/proxy.js';
 import { PauseController } from './xplane/pauseController.js';
 import type { Logger, SimSource } from './xplane/simSource.js';
@@ -37,6 +37,7 @@ export interface BuiltApp {
 
 const CSRF_HEADER = 'x-xpr-request';
 const MAX_STREAM_CLIENTS = 20;
+const STREAM_INTERVAL_MS = 1000;
 
 const PUBLIC_API_ROUTES = new Set(['/api/health', '/api/session']);
 
@@ -62,8 +63,14 @@ export async function buildApp(opts: BuildAppOptions): Promise<BuiltApp> {
     opts.webfmc ??
     new WebFmcProxy({ enabled: config.webfmcEnabled, upstream: config.webfmcUrl, directUrl: config.webfmcDirectUrl, logger: log });
 
+  // Remembers the flight's highest altitude (FF777 T/D: cruise vs descent), fed on every sim update.
+  const flight = new FlightMemory();
+  flight.observe(sim.status());
+  const stopObserving = sim.onChange(() => flight.observe(sim.status()));
+  app.addHook('onClose', async () => stopObserving());
+
   const currentState = (): PublicState =>
-    buildPublicState(sim.status(), sim.pauseCapability(), pause.inFlight(), Date.now(), config.telemetryStaleMs);
+    buildPublicState(sim.status(), sim.pauseCapability(), pause.inFlight(), Date.now(), config.telemetryStaleMs, flight);
 
   const sessionExpiry = (req: { headers: FastifyRequest['headers'] }): number | null =>
     sessions.verify(parseCookies(req.headers.cookie)[SESSION_COOKIE]);
@@ -177,6 +184,11 @@ export async function buildApp(opts: BuildAppOptions): Promise<BuiltApp> {
 
     let closed = false;
     let pending: NodeJS.Timeout | null = null;
+    let lastSentAt = 0;
+    // FF777 CDU mirror bookkeeping: what this client already has, per screen.
+    const sentScreens = new Map<string, string>();
+    let sentCduNull = false;
+    let lastCduAt = 0;
     const send = () => {
       if (closed) return;
       if (sessionExpiry(req) === null) {
@@ -186,14 +198,48 @@ export async function buildApp(opts: BuildAppOptions): Promise<BuiltApp> {
         return;
       }
       res.write(`event: state\ndata: ${JSON.stringify(currentState())}\n\n`);
+      lastSentAt = Date.now();
+      sendCdu();
     };
+    // FF777 CDU mirror (mobile-data friendly): only the screens that changed,
+    // at most once per second. `partial: true` = merge into what the client has.
+    const sendCdu = () => {
+      const now = Date.now();
+      if (now - lastCduAt < 1000) return;
+      const mirror = buildCduMirror(sim.status());
+      if (!mirror) {
+        if (!sentCduNull) {
+          res.write('event: cdu\ndata: null\n\n');
+          sentCduNull = true;
+          sentScreens.clear();
+          lastCduAt = now;
+        }
+        return;
+      }
+      sentCduNull = false;
+      const changed = mirror.screens.filter((s) => sentScreens.get(s.side) !== JSON.stringify(s));
+      if (changed.length === 0) return;
+      const partial = sentScreens.size > 0 && mirror.screens.every((s) => sentScreens.has(s.side));
+      for (const s of changed) sentScreens.set(s.side, JSON.stringify(s));
+      res.write(`event: cdu\ndata: ${JSON.stringify({ ...mirror, screens: partial ? changed : mirror.screens, partial })}\n\n`);
+      lastCduAt = now;
+    };
+    // At most one state push per STREAM_INTERVAL_MS: in flight X-Plane changes
+    // something every frame, and 1 Hz is plenty for a phone on mobile data.
+    // Pause/resume results don't wait for this; they come back on the POST.
     const off = sim.onChange(() => {
-      pending ??= setTimeout(() => {
-        pending = null;
-        send();
-      }, 200);
+      pending ??= setTimeout(
+        () => {
+          pending = null;
+          send();
+        },
+        Math.max(50, STREAM_INTERVAL_MS - (Date.now() - lastSentAt)),
+      );
     });
-    const tick = setInterval(send, 1000); // keeps ages current; also a keep-alive
+    // Keeps ages current while nothing changes; also a keep-alive.
+    const tick = setInterval(() => {
+      if (!pending && Date.now() - lastSentAt >= STREAM_INTERVAL_MS) send();
+    }, STREAM_INTERVAL_MS);
     const cleanup = () => {
       if (closed) return;
       closed = true;

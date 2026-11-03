@@ -120,6 +120,55 @@ The live ETA is hidden below 60 kt GS. After T/D the T/D card is replaced by the
 
 **Live-verified 2026-10-24** in descent into VABB: all four datarefs resolved (`double` / `data` / `data` / `float`). The panel showed 33.4 NM, a live estimate of 7 min and an FMC ETA of 1151Z (in 11 min).
 
+## FlightFactor 777v2
+
+Installed at `Aircraft\FlightFactor777_200ER_300ER_F_EE` (version file `020523`), a SASL plugin.
+Checked live on 2026-11-02 with the 777-300ER flying into VIDP:
+
+- **No route, T/D or ETA datarefs.** Of the 11,546 datarefs in the sim, the FF777 adds 3,091 under `1-sim/...`. They are cockpit switches and animations, MCP outputs (`1-sim/output/mcp/*`), radios, and the CDU screens. It also doesn't feed X-Plane's own FMS (`sim/cockpit/gps/destination_index = -1`).
+- **CDU screen datarefs** (documented in the aircraft's `docs/cduDatarefs.txt`): `1-sim/cdu{L,C,R}/display/symbols` (`data`, 14 × 24 chars + NUL), `symbolsColor` / `symbolsSize` / `symbolsEffects` (`int_array`), plus `numOfLines` / `numOfSymbolsInLine` (`int`).
+- **WebFMC 2.4.1** logs `acf_ICAO: 'B77W' … Unsupported aircraft` and disables itself for the FF777.
+
+The app reads destination data from **PROGRESS page 1**, on whichever CDU shows it (preference centre, then right, then left). Captured pages:
+
+```
+  UAE1234 PROGRESS  1/2        (descent)              AIC1523 PROGRESS  1/2   (cruise, 2026-11-03)
+ TO      DTG  ETA   FUEL                              TO      DTG  ETA   FUEL
+FS817     12 1356Z   8.0                             BOMBI    105 1521Z  63.8
+ NEXT                                                 NEXT
+DP502     25 1359Z   7.7                             TENLO    197 1534Z  62.3
+ DEST                                                 DEST
+VIDP      60 1409Z   7.3                             VIDP    3893 2249Z  14.0
+ TGT SPD          TO E/D                              TGT SPD     TO STEP CLB
+250         1409Z/  58NM                             .838                NONE
+```
+
+### T/D on the FF777 is an estimate
+
+The FF777 FMC never shows a distance to T/D. T/D appears only as the green circle on the ND. PROGRESS shows `TO STEP CLB` or `TO E/D` (end of descent) in cruise, and `TO E/D` in descent too, so `E/D` does **not** mean "T/D passed". No dataref exposes the ND marker; `1-sim/...` was searched for `td`, `tod`, `vnav`, `descent` and `path` on 2026-11-03.
+
+So the app estimates T/D with the standard rule of thumb, and labels it **EST** with a `~`:
+
+```
+T/D ahead ≈ DEST DTG − (altitude_ft / 1000 × 3 + 10)      3 NM per 1000 ft, +10 NM to slow down
+```
+
+Field elevation is ignored, so the estimate errs early: the safe side for "be back at the PC before T/D". Expect it to differ from the ND circle by roughly 5–20 NM, depending on winds, speed restrictions and the FMC's E/D altitude.
+
+| PROGRESS / aircraft | T/D card |
+|---|---|
+| `TO T/C` | CLIMB |
+| `TO T/D hhmmZ/ nnnNM` (never seen, but used if it appears) | *nnn* NM, FMC value |
+| anything else, still at cruise altitude | ~*n* NM (EST); `0` = "T/D due now" |
+| more than 2,500 ft below the flight's highest altitude, **or** descending ≥ 500 fpm within 30 NM of the estimated T/D | PASSED → arrival ETA card |
+| no CDU on PROGRESS 1 | asks you to open it |
+
+The highest altitude of the flight is tracked by the server (`FlightMemory` in `server/src/telemetry.ts`). It resets on the ground (< 50 kt), on an aircraft change and when the position jumps > 20 NM (a new flight loaded). A cruise step-*down* of more than 2,500 ft would therefore show PASSED early.
+
+Destination ETA uses the same two estimates as the Zibo: DEST DTG ÷ ground speed, and the FMC ETA vs `sim/time/zulu_time_sec`.
+
+**Live-verified:** profile detection, telemetry, DEST VIDP 60 → 18 → 5 NM with matching FMC ETAs in descent, and the colour CDU mirror of all three CDUs (2026-11-02). In cruise at FL370 (2026-11-03): `TO STEP CLB` page, T/D estimate 3851 − 121 = ~3730 NM. Not yet seen live: the change from ahead to PASSED at the real T/D, or a `TO T/C` (climb) page. Those are covered by tests.
+
 ## WebFMC
 
 - Served by a Go backend (`gorilla/websocket`) from `Resources/plugins/WebFMC/data`. `index.html` loads `/static/js/app.<hash>.js`, `/static/js/chunk-vendors.<hash>.js` and `/static/css/app.<hash>.css`.

@@ -2,7 +2,7 @@
 // Implemented by XPlaneConnection (real) and MockSimulator (development only).
 
 import type { DataSource, SimLink } from '../shared/api-types.js';
-import type { TelemetryKey } from './datarefs.js';
+import type { TelemetryKey, TelemetryValue } from './datarefs.js';
 
 export interface SimStatus {
   source: DataSource;
@@ -11,7 +11,7 @@ export interface SimStatus {
   xplaneVersion: string | null;
   apiVersion: string | null;
   /** Last known normalised values, by key. Absent = never received or no longer valid. */
-  values: Partial<Record<TelemetryKey, number | string>>;
+  values: Partial<Record<TelemetryKey, TelemetryValue>>;
   /** Datarefs that currently exist in the simulator (resolved by name). */
   available: ReadonlySet<TelemetryKey>;
   /** Epoch ms of the last confirmed contact with the simulator. */

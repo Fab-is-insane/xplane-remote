@@ -924,3 +924,88 @@ a {
     font-size: 26px;
   }
 }
+
+/* ------------------------------------------------------------------ CDU mirror (FF777) */
+
+.cdu-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.cdu-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line-hi);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.cdu-tab.is-active {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.cdu-prog {
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  color: var(--ink);
+  background: var(--green);
+}
+
+.cdu-screen {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #000;
+  border: 1px solid var(--line);
+  /* 24 columns must fit a phone: ~0.6em per char. */
+  font-size: clamp(12px, 4.6vw, 19px);
+  line-height: 1.35;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.cdu-line {
+  min-height: 1.35em;
+}
+
+/* Small font, same column pitch as the large font (like the real CDU):
+   1ch here is 0.78 × the parent's, so pad each glyph by (1/0.78 − 1) ch. */
+.cdu-small {
+  font-size: 0.78em;
+  letter-spacing: 0.282ch;
+}
+
+.cdu-c1 {
+  color: #f2f2f2;
+}
+.cdu-c2 {
+  color: #ff6bf0;
+}
+.cdu-c3 {
+  color: #3ddc84;
+}
+.cdu-c4 {
+  color: #4fd8ff;
+}
+.cdu-c5 {
+  color: #8a8a8a;
+}
+.cdu-c6 {
+  color: #6c8cff;
+}
+
+.cdu:not(.is-open) .card-head {
+  margin-bottom: 0;
+}
