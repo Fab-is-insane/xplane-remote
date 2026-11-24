@@ -5,7 +5,7 @@
 //  3. Open the WebSocket and subscribe to the resolved dataref ids (10 Hz,
 //     X-Plane only sends values that changed).
 //  4. While connected: a REST heartbeat re-reads sim/time/paused, aircraft-
-//     specific datarefs (Zibo) are re-resolved periodically and after an
+//     specific datarefs (Zibo, FF777, ToLiss) are re-resolved periodically and after an
 //     aircraft change, and a watchdog drops a silent WebSocket.
 //  5. Any failure ends the session; the loop reconnects from step 1.
 
@@ -31,6 +31,9 @@ import {
   type FetchLike,
 } from './restClient.js';
 import { silentLogger, type Logger, type PauseCapability, type SimSource, type SimStatus } from './simSource.js';
+
+/** Upper bound on "drop the unknown name and retry" rounds per family before per-name lookup. */
+const MAX_PRUNE_ATTEMPTS = 40;
 
 export interface ConnectionOptions {
   baseUrl: URL;
@@ -75,6 +78,8 @@ export class XPlaneConnection implements SimSource {
   private readonly values = new Map<TelemetryKey, TelemetryValue>();
   private readonly commands = new Map<string, CommandInfo>();
   private readonly typeWarnings = new Set<string>();
+  /** Dataref names X-Plane reported as unknown for the current aircraft (see findFamily). */
+  private readonly missingNames = new Set<string>();
   private lastContactAt: number | null = null;
   private lastWsMessageAt = 0;
 
@@ -227,6 +232,7 @@ export class XPlaneConnection implements SimSource {
     this.idToKey.clear();
     this.commands.clear();
     this.values.clear();
+    this.missingNames.clear();
     this.setLink('connecting', 'Discovering datarefs');
 
     await this.resolveDatarefs(DATAREFS);
@@ -290,8 +296,53 @@ export class XPlaneConnection implements SimSource {
 
   // ------------------------------------------------------- discovery
 
+  /**
+   * Look up one family of datarefs (e.g. all ToLiss MCDU lines) by name.
+   * X-Plane answers a batch with 404 if ANY name is unknown ("Dataref name
+   * 'x' doesn't exist"), so naive per-name fallback would cost one request
+   * per name, every refresh. Instead:
+   *  - one batch for the family, minus names already known to be missing;
+   *  - if the family's first name (its probe) is the missing one, the add-on
+   *    is not loaded: skip the family (1 request);
+   *  - otherwise drop the reported name, remember it, retry (a partly
+   *    different add-on version costs a few requests, once per aircraft).
+   */
+  private async findFamily(specs: readonly DatarefSpec[]): Promise<DatarefInfo[]> {
+    const probe = specs[0]!.name;
+    let probeExists = false;
+    let names = specs.map((s) => s.name).filter((n) => !this.missingNames.has(n));
+    for (let attempt = 0; names.length > 0 && attempt < MAX_PRUNE_ATTEMPTS; attempt++) {
+      try {
+        return await this.rest.findDatarefs(names, { perNameFallback: false });
+      } catch (err) {
+        if (!(err instanceof XPlaneApiError && err.kind === 'http' && err.status === 404)) throw err;
+        const missing = err.message.match(/Dataref name '([^']+)' doesn't exist/)?.[1];
+        if (missing === probe) return [];
+        if (!probeExists) {
+          // Some other name is missing: make sure the add-on is loaded at all before pruning.
+          const found = await this.rest.findDatarefs([probe], { perNameFallback: false }).catch(() => []);
+          if (found.length === 0) return [];
+          probeExists = true;
+        }
+        if (missing === undefined || !names.includes(missing)) break;
+        this.missingNames.add(missing);
+        names = names.filter((n) => n !== missing);
+      }
+    }
+    // Unrecognised error text or too many missing names: one request per name.
+    return names.length ? this.rest.findDatarefs(names) : [];
+  }
+
   private async resolveDatarefs(specs: readonly DatarefSpec[]): Promise<{ added: number[]; removed: number[] }> {
-    const infos = await this.rest.findDatarefs(specs.map((s) => s.name));
+    const families = new Map<string, DatarefSpec[]>();
+    for (const s of specs) {
+      const f = s.family ?? 'core';
+      const list = families.get(f);
+      if (list) list.push(s);
+      else families.set(f, [s]);
+    }
+    const infos: DatarefInfo[] = [];
+    for (const group of families.values()) infos.push(...(await this.findFamily(group)));
     const byName = new Map(infos.map((i) => [i.name, i]));
     const added: number[] = [];
     const removed: number[] = [];
@@ -351,6 +402,7 @@ export class XPlaneConnection implements SimSource {
 
   private onAircraftChanged() {
     this.log.info('Aircraft changed; re-discovering aircraft datarefs');
+    this.missingNames.clear();
     for (const [key, ref] of this.refs) if (ref.spec.group === 'aircraft') this.values.delete(key);
     this.emitChange();
     if (this.aircraftResolveTimer) clearTimeout(this.aircraftResolveTimer);

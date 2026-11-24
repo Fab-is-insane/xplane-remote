@@ -3,8 +3,9 @@
 // they are covered by unit tests.
 
 import { FF_CDU_KEYS, cduDataref, cduScreens, findProgress } from './aircraft/ff777.js';
+import { TOLISS_PHASE_NAMES, findFplnDest, findTd, tolissScreens } from './aircraft/toliss.js';
 import type { AircraftProfile, CduMirror, ControlInfo, DestInfo, PublicState, Telemetry, TodInfo } from './shared/api-types.js';
-import { FT_PER_M, KT_PER_MS } from './xplane/datarefs.js';
+import { FT_PER_M, KT_PER_MS, type TelemetryKey } from './xplane/datarefs.js';
 import type { PauseCapability, SimStatus } from './xplane/simSource.js';
 
 const TD_SOURCE = 'laminar/B738/fms/vnav_td_dist';
@@ -49,18 +50,21 @@ export function buildTelemetry(status: SimStatus, now: number, staleMs: number):
 
 /**
  * Which aircraft logic applies, decided by the datarefs that actually exist:
- * the Zibo's laminar/B738/... FMC datarefs, or the FlightFactor 777's 1-sim/cdu… screens.
+ * the Zibo's laminar/B738/... FMC datarefs, the FlightFactor 777's 1-sim/cdu…
+ * screens, or the ToLiss AirbusFBW/... FMS and MCDU datarefs.
  */
 export function detectProfile(status: SimStatus): AircraftProfile {
-  const zibo = status.available.has('ziboTdDist') || status.available.has('ziboDestDist');
-  const ff = FF_CDU_KEYS.some((k) => status.available.has(k));
-  if (zibo && ff) {
-    // Should not happen (one aircraft at a time); let the ICAO decide.
-    return str(status.values.acfIcao)?.startsWith('B77') ? 'ff777' : 'zibo737';
-  }
-  if (zibo) return 'zibo737';
-  if (ff) return 'ff777';
-  return 'generic';
+  const has = (k: TelemetryKey) => status.available.has(k);
+  const found: AircraftProfile[] = [];
+  if (has('ziboTdDist') || has('ziboDestDist')) found.push('zibo737');
+  if (FF_CDU_KEYS.some(has)) found.push('ff777');
+  if (has('tlDistDest') || has('tl1_titlew') || has('tl2_titlew')) found.push('toliss');
+  if (found.length <= 1) return found[0] ?? 'generic';
+  // Should not happen (one aircraft at a time); let the ICAO decide.
+  const icao = str(status.values.acfIcao) ?? '';
+  if (icao.startsWith('A3') && found.includes('toliss')) return 'toliss';
+  if (icao.startsWith('B77') && found.includes('ff777')) return 'ff777';
+  return found.includes('zibo737') ? 'zibo737' : found[0]!;
 }
 
 const FF_NO_PROG = 'Open PROGRESS page 1 on any CDU (the centre CDU is ideal) to see T/D and ETA.';
@@ -74,11 +78,13 @@ export function interpretTod(status: SimStatus, flight: FlightContext | null = n
       return interpretZiboTod(status);
     case 'ff777':
       return interpretFfTod(status, flight);
+    case 'toliss':
+      return interpretTolissTod(status, flight);
     default:
       return {
         status: 'unavailable',
         distanceNm: null,
-        detail: 'T/D needs the Zibo 737 or FlightFactor 777 FMC.',
+        detail: 'T/D needs the Zibo 737, FlightFactor 777 or ToLiss A321 FMS.',
         source: null,
       };
   }
@@ -86,8 +92,8 @@ export function interpretTod(status: SimStatus, flight: FlightContext | null = n
 
 /**
  * What the server remembers about the current flight between updates. Used
- * for the FF777 only: to tell "still at cruise" from "descending", it needs
- * the highest altitude reached this flight.
+ * for the FF777 (and the ToLiss without its phase dataref): to tell "still at
+ * cruise" from "descending", it needs the highest altitude reached this flight.
  */
 export interface FlightContext {
   peakAltitudeFt: number | null;
@@ -205,6 +211,82 @@ function interpretFfTod(status: SimStatus, flight: FlightContext | null): TodInf
   };
 }
 
+const TL_DIST_SOURCE = 'AirbusFBW/DistToDest';
+
+/**
+ * ToLiss A321. No dataref carries T/D, but the FMS prints it on PROG → REPORT
+ * ("T/D  UTC DIST" / "AT FL350 1309  507"). In order:
+ *  1. FMGS phase (AirbusFBW/APPhase) DESCENT or later → passed;
+ *  2. an MCDU shows the T/D line → the FMS's exact distance and time;
+ *  3. otherwise an estimate: DistToDest − (CRZ FL ft / 1000 × 3 + 10), using
+ *     the INIT A cruise altitude so it is meaningful during the climb too.
+ * Without the phase dataref, "passed" uses the same altitude-history rule as the FF777.
+ */
+function interpretTolissTod(status: SimStatus, flight: FlightContext | null): TodInfo {
+  const v = status.values;
+  if (!status.available.has('tlDistDest')) {
+    return { status: 'unavailable', distanceNm: null, detail: 'T/D needs the ToLiss FMS datarefs, which are not loaded.', source: null };
+  }
+  const dist = num(v.tlDistDest);
+  if (dist === null) return { status: 'unavailable', distanceNm: null, detail: 'Waiting for FMS data…', source: TL_DIST_SOURCE };
+  if (dist <= 0) {
+    return { status: 'no_td', distanceNm: null, detail: 'No flight plan with a destination in the MCDU.', source: TL_DIST_SOURCE };
+  }
+
+  const phase = num(v.tlFmgsPhase);
+  if (phase !== null && phase >= 4 && phase <= 7) {
+    return {
+      status: 'passed',
+      distanceNm: null,
+      detail: `FMGS phase ${TOLISS_PHASE_NAMES[phase]}: past T/D.`,
+      source: 'AirbusFBW/APPhase',
+    };
+  }
+
+  // Exact FMS figures when an MCDU shows the "T/D … UTC DIST" line (PROG → REPORT).
+  const td = findTd(v);
+  if (td && td.distNm !== null) {
+    const { zulu, minutes } = zuluEta(td.etaZulu, num(v.zuluTimeSec));
+    return {
+      status: 'ahead',
+      distanceNm: round(td.distNm, 1),
+      detail: `along route // toliss fms (${td.page} T/D${td.level ? ` AT ${td.level}` : ''})`,
+      source: `AirbusFBW/MCDU${td.side === 'L' ? 1 : 2} · ${td.page} T/D`,
+      fmcEtaZulu: zulu,
+      fmcEtaMinutes: round(minutes, 0),
+    };
+  }
+
+  const alt = num(v.altitudeFt);
+  const crz = num(v.tlCruiseAlt);
+  const crzOk = crz !== null && crz >= 1000 && crz <= 45000;
+  const levelFt = Math.max(crzOk ? crz : 0, alt ?? 0);
+  const source = `${TL_DIST_SOURCE} + ${crzOk ? 'toliss_airbus/init/cruise_alt' : 'altitude_ft_pilot'}`;
+  if (levelFt <= 0) return { status: 'calculating', distanceNm: null, detail: 'Waiting for altitude / CRZ FL…', source };
+  const est = dist - ((levelFt / 1000) * FF_NM_PER_1000FT + FF_DECEL_NM);
+
+  if (phase === null && alt !== null) {
+    // No FMGS phase: fall back to "left cruise altitude / descending near T/D".
+    const peak = flight?.peakAltitudeFt ?? null;
+    const vs = num(v.vsFpm);
+    const leftCruise = peak !== null && peak >= levelFt - 1000 && alt < peak - FF_LEFT_CRUISE_FT;
+    const descendingNearTd = vs !== null && vs <= FF_DESCENT_FPM && est <= FF_DESCENT_NEAR_NM;
+    if (leftCruise || descendingNearTd) return { status: 'passed', distanceNm: null, detail: 'Descending: past T/D.', source };
+  }
+
+  const from = crzOk ? `CRZ FL${Math.round(crz / 100)}` : 'current altitude';
+  if (est <= 0) {
+    return { status: 'ahead', distanceNm: 0, detail: 'T/D due now (est.) // check the T/D symbol on the ND', source, estimated: true };
+  }
+  return {
+    status: 'ahead',
+    distanceNm: round(est, 0),
+    detail: `est. 3 NM/1000 ft from ${from} + 10 // ND T/D symbol may differ a little`,
+    source,
+    estimated: true,
+  };
+}
+
 /**
  * Zibo 737 T/D, derived from the aircraft's own FMC datarefs (B738.a_fms.lua):
  *  - vnav_td_idx == 0            → no T/D computed (no route/CRZ ALT/PERF INIT)
@@ -247,6 +329,22 @@ function interpretZiboTod(status: SimStatus): TodInfo {
     return { status: 'ahead', distanceNm: round(dist, 1), detail: 'along route // zibo fmc', source: TD_SOURCE };
   }
   return { status: 'passed', distanceNm: round(Math.abs(dist), 1), detail: 'T/D passed.', source: TD_SOURCE };
+}
+
+/**
+ * An FMC "HHMM" Zulu time → the validated "HHMM" and minutes from the sim's
+ * Zulu clock (sim/time/zulu_time_sec). Null parts when invalid / no clock.
+ */
+function zuluEta(hhmm: string | null | undefined, zuluSec: number | null): { zulu: string | null; minutes: number | null } {
+  const m = hhmm?.match(/^(\d{2})(\d{2})/);
+  if (!m) return { zulu: null, minutes: null };
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (hh >= 24 || mm >= 60) return { zulu: null, minutes: null };
+  if (zuluSec === null) return { zulu: `${m[1]}${m[2]}`, minutes: null };
+  const diffMin = ((hh * 3600 + mm * 60 - zuluSec + 86400) % 86400) / 60;
+  // A wrap to ~24 h means the FMC time is just behind the clock: treat as now.
+  return { zulu: `${m[1]}${m[2]}`, minutes: diffMin > 20 * 60 ? 0 : diffMin };
 }
 
 /** Minimum ground speed for a distance ÷ speed estimate to mean anything. */
@@ -303,8 +401,22 @@ export function interpretDest(status: SimStatus, now: number): DestInfo {
       };
       break;
     }
+    case 'toliss': {
+      if (!status.available.has('tlDistDest')) return noDest('Destination data needs the ToLiss FMS datarefs.');
+      const dist = num(v.tlDistDest);
+      if (dist === null || dist <= 0) return noDest('No flight plan with a destination in the MCDU.');
+      // The FMS ETA is only on screen: the DEST line of F-PLN, if an MCDU shows it.
+      const fpln = findFplnDest(v);
+      facts = {
+        icao: str(v.tlDestIcao) ?? fpln?.icao ?? null,
+        distNm: dist,
+        etaZulu: fpln?.etaZulu ?? null,
+        source: fpln?.etaZulu ? `${TL_DIST_SOURCE} · MCDU${fpln.side === 'L' ? 1 : 2} F-PLN DEST UTC` : TL_DIST_SOURCE,
+      };
+      break;
+    }
     default:
-      return noDest('Destination data needs the Zibo 737 or FlightFactor 777 FMC.');
+      return noDest('Destination data needs the Zibo 737, FlightFactor 777 or ToLiss A321 FMS.');
   }
 
   const gsMs = num(v.groundspeedMs);
@@ -312,22 +424,7 @@ export function interpretDest(status: SimStatus, now: number): DestInfo {
   let liveEtaMinutes: number | null = null;
   if (gsKt !== null && gsKt >= MIN_ETA_GS_KT) liveEtaMinutes = (facts.distNm / gsKt) * 60;
 
-  const m = facts.etaZulu?.match(/^(\d{2})(\d{2})/);
-  let fmcEtaZulu: string | null = null;
-  let fmcEtaMinutes: number | null = null;
-  if (m) {
-    const hh = Number(m[1]);
-    const mm = Number(m[2]);
-    if (hh < 24 && mm < 60) {
-      fmcEtaZulu = `${m[1]}${m[2]}`;
-      const zulu = num(v.zuluTimeSec);
-      if (zulu !== null) {
-        const diffMin = ((hh * 3600 + mm * 60 - zulu + 86400) % 86400) / 60;
-        // A wrap to ~24 h means the FMC time is just behind the clock: treat as arriving now.
-        fmcEtaMinutes = diffMin > 20 * 60 ? 0 : diffMin;
-      }
-    }
-  }
+  const { zulu: fmcEtaZulu, minutes: fmcEtaMinutes } = zuluEta(facts.etaZulu, num(v.zuluTimeSec));
 
   return {
     available: true,
@@ -345,11 +442,18 @@ export function interpretDest(status: SimStatus, now: number): DestInfo {
   };
 }
 
-/** Read-only CDU mirror for the FF777 (WebFMC does not support it). Null for other aircraft. */
+/** Read-only CDU/MCDU mirror for the FF777 and ToLiss (WebFMC supports neither). Null for other aircraft. */
 export function buildCduMirror(status: SimStatus): CduMirror | null {
-  if (detectProfile(status) !== 'ff777') return null;
-  const screens = cduScreens(status.values);
-  return screens.length ? { aircraft: 'ff777', screens } : null;
+  const profile = detectProfile(status);
+  if (profile === 'ff777') {
+    const screens = cduScreens(status.values);
+    return screens.length ? { aircraft: 'ff777', screens } : null;
+  }
+  if (profile === 'toliss') {
+    const screens = tolissScreens(status.values);
+    return screens.length ? { aircraft: 'toliss', screens } : null;
+  }
+  return null;
 }
 
 export function buildControlInfo(cap: PauseCapability, inFlight: ControlInfo['inFlight']): ControlInfo {

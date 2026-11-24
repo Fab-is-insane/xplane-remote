@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { XPlaneConnection } from '../src/xplane/connection.js';
+import { TOLISS_MCDU_FIELDS } from '../src/xplane/datarefs.js';
 import { PauseController } from '../src/xplane/pauseController.js';
 import { buildCduMirror, buildTelemetry, detectProfile, interpretDest, interpretTod } from '../src/telemetry.js';
 import { FakeXPlane, closedPort, waitFor, type FakeOptions } from './fakeXPlane.js';
@@ -169,6 +170,63 @@ describe('XPlaneConnection against a fake X-Plane Web API', () => {
     expect(d).toMatchObject({ available: true, icao: 'VIDP', distanceNm: 230.4, fmcEtaZulu: '1452', fmcEtaMinutes: 30 });
     // fake GS is 230 m/s ≈ 447 kt → ≈ 31 min
     expect(d.liveEtaMinutes).toBeCloseTo((230.4 / (230 * 1.9438444924406)) * 60, 0);
+  });
+
+  const b64 = (t: string) => Buffer.from(`${t}\0\0`, 'latin1').toString('base64');
+  /** Every ToLiss MCDU layer dataref, like the real aircraft: mostly empty, a few with text on MCDU1. */
+  const tolissDatarefs = (text: Record<string, string>, omit: readonly string[] = []) => [
+    { name: 'AirbusFBW/DistToDest', value_type: 'float', value: 548.4 },
+    { name: 'toliss_airbus/flightplan/destination_icao', value_type: 'data', value: b64('VIDP') },
+    { name: 'toliss_airbus/init/cruise_alt', value_type: 'float', value: 35000 },
+    { name: 'AirbusFBW/APPhase', value_type: 'int', value: 2 },
+    ...[1, 2].flatMap((n) =>
+      TOLISS_MCDU_FIELDS.filter((f) => !omit.includes(`${n}${f}`)).map((f) => ({
+        name: `AirbusFBW/MCDU${n}${f}`,
+        value_type: 'data',
+        value: b64(n === 1 ? (text[f] ?? '') : ''),
+      })),
+    ),
+  ];
+
+  it('streams ToLiss FMS datarefs and MCDU layer lines (leading spaces kept)', async () => {
+    const { fake, conn } = await setup({
+      extraDatarefs: tolissDatarefs({
+        titlew: ' FROM          6488',
+        label6w: 'DEST    UTC   DIST  EFOB',
+        cont6w: 'VIDP11L 1722   548   3.0',
+        scont4g: '        1610   " / FL350',
+      }),
+    });
+    await waitFor(() => typeof conn.status().values.tl1_scont4g === 'string' && conn.status().values.tlFmgsPhase !== undefined);
+    const st = conn.status();
+    expect(st.values.tl1_scont4g).toBe('        1610   " / FL350');
+    expect(st.values.tlDestIcao).toBe('VIDP');
+    expect(detectProfile(st)).toBe('toliss');
+    expect(interpretTod(st)).toMatchObject({ status: 'ahead', estimated: true, distanceNm: 433 });
+    expect(interpretDest(st, Date.now())).toMatchObject({ icao: 'VIDP', fmcEtaZulu: '1722' });
+    expect(buildCduMirror(st)?.screens[0]?.lines[12]).toBe('VIDP11L 1722   548   3.0');
+    // Discovery is one batch per dataref family (6), even though X-Plane 404s
+    // a batch with any unknown name and the Zibo/FF777 families are absent.
+    expect(fake.datarefQueries.length).toBeLessThanOrEqual(8);
+  });
+
+  it('copes with an add-on version missing a few MCDU datarefs in a few requests, then caches it', async () => {
+    const { fake, conn } = await setup(
+      { extraDatarefs: tolissDatarefs({ cont6w: 'VIDP11L 1722   548   3.0' }, ['1spa', '2spa', '2scont6s']) },
+      { resolveIntervalMs: 150 },
+    );
+    await waitFor(() => conn.status().values.tl1_cont6w === 'VIDP11L 1722   548   3.0');
+    // 6 families + one retry per missing name + one probe check
+    expect(fake.datarefQueries.length).toBeLessThanOrEqual(6 + 3 + 1 + 2);
+    expect(conn.status().available.has('tl1_spw')).toBe(true);
+    expect(conn.status().available.has('tl1_spa')).toBe(false);
+    // Periodic refreshes reuse the known-missing names: one batch per family, MCDU lines in one request.
+    const before = fake.datarefQueries.length;
+    await new Promise((r) => setTimeout(r, 500));
+    const after = fake.datarefQueries.slice(before);
+    const refreshes = after.filter((n) => n > 200).length;
+    expect(refreshes).toBeGreaterThanOrEqual(1);
+    expect(after.length).toBeLessThanOrEqual(refreshes * 6 + 6);
   });
 
   it('streams FlightFactor 777 CDU screens (data + int_array) and reads PROGRESS', async () => {

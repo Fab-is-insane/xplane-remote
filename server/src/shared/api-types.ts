@@ -40,7 +40,7 @@ export interface Telemetry {
 }
 
 /** Which aircraft-specific logic is active (decided from the datarefs that exist). */
-export type AircraftProfile = 'zibo737' | 'ff777' | 'generic';
+export type AircraftProfile = 'zibo737' | 'ff777' | 'toliss' | 'generic';
 
 export type TodStatus =
   | 'unavailable' // no supported FMC data (other aircraft, or FF777 with no CDU on PROGRESS)
@@ -63,6 +63,10 @@ export interface TodInfo {
    * (FF777: its FMC shows T/D only as a marker on the ND, not as a number).
    */
   estimated?: boolean;
+  /** FMC/FMS predicted time of T/D, "HHMM" Zulu, when the aircraft shows one (ToLiss PROG REPORT). */
+  fmcEtaZulu?: string | null;
+  /** Minutes from the sim's Zulu clock to fmcEtaZulu. */
+  fmcEtaMinutes?: number | null;
 }
 
 export interface DestInfo {
@@ -85,21 +89,24 @@ export interface DestInfo {
 
 export type CduSide = 'L' | 'C' | 'R';
 
-/** One CDU screen, read-only mirror (FF777). */
+/** One CDU / MCDU screen, read-only mirror (FF777, ToLiss). */
 export interface CduScreen {
   side: CduSide;
   /** Screen text, one string per line (24 chars). */
   lines: string[];
-  /** Per-character colour codes as digit strings: 1 white 2 magenta 3 green 4 cyan 5 grey 6 blue. */
+  /** Per-character colour codes as digit strings: 1 white 2 magenta 3 green 4 cyan 5 grey 6 blue 7 amber 8 yellow. */
   colors: string[] | null;
   /** Per-character size as digit strings: 1 normal 2 small. */
   sizes: string[] | null;
+  /** True when this is the page the app reads (FF777 PROGRESS 1, ToLiss F-PLN). */
   isProgress: boolean;
+  /** Short tag for that page in the mirror tabs ("PROG", "F-PLN"). */
+  badge: string | null;
 }
 
 /** Sent as a separate `cdu` stream event, only when a screen changes. */
 export interface CduMirror {
-  aircraft: 'ff777';
+  aircraft: 'ff777' | 'toliss';
   screens: CduScreen[];
   /** Stream only: true = these screens replace the matching sides the client already has. */
   partial?: boolean;

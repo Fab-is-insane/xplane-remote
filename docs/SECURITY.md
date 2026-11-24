@@ -42,6 +42,7 @@ Browser on the PC ────────────────────�
 **Least privilege towards X-Plane**
 - The only simulator actions in the code are `sim/operation/pause_on`, `pause_off` and `pause_toggle`. They are allow-listed in `datarefs.ts` and checked again before activation.
 - FlightFactor 777 support only **reads** datarefs (CDU screen text, colours, sizes). The CDU mirror is read-only, and no FF777 CDU key commands are allow-listed.
+- ToLiss support only **reads** datarefs (FMS distance/destination/CRZ FL/phase and the MCDU line strings). The MCDU mirror is read-only; no MCDU key commands are allow-listed, and the ToLiss flight-plan query datarefs (`toliss_airbus/flightplan/query_wp_index` etc., which work by *writing*) are deliberately not used.
 - **No dataref is ever written.** There is no endpoint that accepts a command name, dataref name, URL or port. The tests assert that generic routes like `/api/command` do not exist.
 - Upstream URLs (`XPLANE_API_URL`, `WEBFMC_URL`) must be loopback `http://` origins without a path; anything else fails at start-up. The proxy cannot be pointed elsewhere at runtime.
 

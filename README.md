@@ -1,6 +1,6 @@
 # X-Plane Remote
 
-A private, mobile-first flight companion for **X-Plane 12**, with FMC support for the **Zibo 737-800** and the **FlightFactor 777v2**.
+A private, mobile-first flight companion for **X-Plane 12**, with FMC support for the **Zibo 737-800**, the **FlightFactor 777v2** and the **ToLiss A321**.
 It runs on your Windows PC next to the simulator. From your phone (over Tailscale) you can:
 
 - see whether X-Plane is connected, and whether it is **PAUSED** or **RUNNING**;
@@ -197,9 +197,12 @@ What the header tells you:
 |---|---|---|
 | Zibo 737-800 | `laminar/B738/...` FMC datarefs (always on) | WebFMC (embedded) |
 | FlightFactor 777v2 | **PROGRESS page 1** on any CDU: destination, distance and FMC ETA from the `DEST` line. T/D is an **estimate** (~, EST): DEST DTG − (3 NM per 1000 ft + 10), because the FF777 shows T/D only on the ND | Read-only **CDU mirror** (CAPT / CTR / F/O). WebFMC reports the FF777 as unsupported |
+| ToLiss A321 (neo / ceo) | FMS datarefs: destination + distance (`AirbusFBW/DistToDest`), CRZ FL and the FMGS flight phase, always available. FMS ETA from the F-PLN **DEST** line when an MCDU shows F-PLN. T/D is the **FMS's exact distance and time** while an MCDU shows **PERF CRZ** or **PROG → REPORT**; otherwise an **estimate** (~, EST): distance to destination − (CRZ FL/1000 × 3 + 10). *Passed* once the FMGS phase is DESCENT | Read-only colour **MCDU mirror** (CAPT / F/O). WebFMC (free) reports the ToLiss as unsupported |
 | Anything else | not available ("—") | WebFMC if it supports the aircraft |
 
 The FF777's FMC publishes no route datarefs, so keep **PROGRESS page 1 open on one CDU**; the centre CDU is ideal. Otherwise the card asks you to. The tab with PROGRESS open is marked `PROG` in the mirror.
+
+On the ToLiss, keep **PERF CRZ** or **PROG → REPORT** open on one MCDU for the exact FMS T/D distance and time; that tab is marked `T/D`. Without it the card shows an estimate, so it is never blank. Leave **F-PLN** on the other MCDU if you also want the FMS's own destination ETA (tab marked `F-PLN`).
 Pause/resume and the basic telemetry use X-Plane's own datarefs and work with any aircraft.
 
 **After T/D** the card switches to **ETA to destination**. It shows a live estimate (FMC route distance `laminar/B738/FMS/dist_dest` ÷ current ground speed, with your local clock time) and the FMC's own ETA (`laminar/B738/FMS/time_dest`, Zulu). The live figure runs a little early in the descent because you slow down on approach; the FMC figure accounts for that. Details: [docs/INVESTIGATION.md](docs/INVESTIGATION.md#destination-eta-zibo-737).

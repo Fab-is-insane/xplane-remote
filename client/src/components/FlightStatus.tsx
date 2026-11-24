@@ -105,13 +105,27 @@ export function FlightStatus({ state, live, ageMs }: Props) {
           <dd>{state?.apiVersion ?? DASH}</dd>
           <dt>fmc profile</dt>
           <dd className="mono-sm">
-            {state?.profile === 'zibo737' ? 'zibo 737 (laminar/B738 datarefs)' : state?.profile === 'ff777' ? 'ff 777v2 (1-sim cdu screens)' : (state?.profile ?? DASH)}
+            {state?.profile === 'zibo737'
+              ? 'zibo 737 (laminar/B738 datarefs)'
+              : state?.profile === 'ff777'
+                ? 'ff 777v2 (1-sim cdu screens)'
+                : state?.profile === 'toliss'
+                  ? 'toliss a321 (AirbusFBW fms + mcdu)'
+                  : (state?.profile ?? DASH)}
           </dd>
           <dt>t/d src</dt>
           <dd className="mono-sm">{tod?.source ?? DASH}</dd>
           <dt>t/d model</dt>
           <dd className="mono-sm">
-            {tod?.estimated ? 'DEST DTG − (3 NM/1000 ft + 10) · est.' : tod?.source ? 'fmc value' : DASH}
+            {tod?.estimated
+              ? state?.profile === 'toliss'
+                ? 'DistToDest − (CRZ FL/1000 × 3 + 10) · est.'
+                : 'DEST DTG − (3 NM/1000 ft + 10) · est.'
+              : tod?.source === 'AirbusFBW/APPhase'
+                ? 'fmgs flight phase'
+                : tod?.source
+                  ? 'fmc value'
+                  : DASH}
           </dd>
           <dt>dest src</dt>
           <dd className="mono-sm">{dest?.source ?? DASH}</dd>
@@ -154,7 +168,15 @@ function TodPanel({ tod, gsKt }: { tod: PublicState['tod'] | null; gsKt: number 
       value = `${tod.estimated ? '~' : ''}${fmtNm(tod.distanceNm)}`;
       unit = 'NM';
       tone = (tod.distanceNm ?? 99) <= 10 ? 'warn' : 'accent';
-      note = [fmtEta(tod.distanceNm, gsKt) ? `${fmtEta(tod.distanceNm, gsKt)} @ current GS` : null, tod.detail]
+      note = [
+        // The FMS's own T/D time beats distance ÷ ground speed when the aircraft shows one.
+        tod.fmcEtaZulu
+          ? `FMS T/D ${tod.fmcEtaZulu}Z${tod.fmcEtaMinutes != null ? ` (in ${fmtDuration(tod.fmcEtaMinutes)})` : ''}`
+          : fmtEta(tod.distanceNm, gsKt)
+            ? `${fmtEta(tod.distanceNm, gsKt)} @ current GS`
+            : null,
+        tod.detail,
+      ]
         .filter(Boolean)
         .join(' · ');
       break;

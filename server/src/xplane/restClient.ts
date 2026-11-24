@@ -81,15 +81,21 @@ export class XPlaneRestClient {
   }
 
   /** Look up datarefs by exact name. Names that do not exist are simply absent from the result. */
-  async findDatarefs(names: readonly string[]): Promise<DatarefInfo[]> {
+  async findDatarefs(names: readonly string[], opts: { perNameFallback?: boolean } = {}): Promise<DatarefInfo[]> {
     if (names.length === 0) return [];
     try {
       const body = await this.request<any>('GET', `/api/${this.apiVersion}/datarefs?${nameFilter(names)}`);
       return parseList(body, parseDataref);
     } catch (err) {
-      // If the server rejects the whole batch because one name is unknown,
-      // fall back to one request per name.
-      if (err instanceof XPlaneApiError && err.kind === 'http' && err.status === 404 && names.length > 1) {
+      // X-Plane rejects the whole batch (404) if one name is unknown: fall
+      // back to one request per name unless the caller handles that itself.
+      if (
+        (opts.perNameFallback ?? true) &&
+        err instanceof XPlaneApiError &&
+        err.kind === 'http' &&
+        err.status === 404 &&
+        names.length > 1
+      ) {
         const out: DatarefInfo[] = [];
         for (const n of names) out.push(...(await this.findDatarefs([n]).catch(() => [])));
         return out;

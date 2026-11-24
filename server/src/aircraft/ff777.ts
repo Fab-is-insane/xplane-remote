@@ -75,12 +75,14 @@ export function cduScreens(values: Values): CduScreen[] {
     const text = values[s.text];
     if (typeof text !== 'string') continue;
     const screenLines = splitLines(text, lines, cols);
+    const isProgress = isProgressPage1(screenLines);
     out.push({
       side: s.side,
       lines: screenLines,
       colors: arrayLines(values[s.color], lines, cols),
       sizes: arrayLines(values[s.size], lines, cols),
-      isProgress: isProgressPage1(screenLines),
+      isProgress,
+      badge: isProgress ? 'PROG' : null,
     });
   }
   return out;

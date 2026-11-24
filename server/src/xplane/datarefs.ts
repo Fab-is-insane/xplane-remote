@@ -6,15 +6,17 @@
 // Resources/plugins/DataRefs.txt and Commands.txt, and the Zibo 737 (4.05.33)
 // datarefs against plugins/xlua/scripts/B738.a_fms/B738.a_fms.lua, and the
 // FlightFactor 777v2 CDU datarefs against its docs/cduDatarefs.txt and the
-// live sim.
+// live sim, and the ToLiss A321 (v1.3.2) datarefs against the live sim.
 
 /**
  * - number:   scalar int/float/double
  * - string:   byte array decoded as text, cut at the first NUL (names, ICAO codes)
  * - screen:   byte array decoded at full length, NUL → space (CDU screen text)
  * - intArray: int array (CDU colours / sizes)
+ * - line:     byte array decoded as one display line: cut at the first NUL, NOT trimmed
+ *             (leading spaces are column positions), control/high bytes → space
  */
-export type DatarefKind = 'number' | 'string' | 'screen' | 'intArray';
+export type DatarefKind = 'number' | 'string' | 'screen' | 'intArray' | 'line';
 
 export type TelemetryValue = number | string | number[];
 
@@ -48,7 +50,42 @@ export type TelemetryKey =
   | 'ffCduRColor'
   | 'ffCduLSize'
   | 'ffCduCSize'
-  | 'ffCduRSize';
+  | 'ffCduRSize'
+  | 'tlDistDest'
+  | 'tlDestIcao'
+  | 'tlCruiseAlt'
+  | 'tlFmgsPhase'
+  | TolissMcduKey;
+
+// ToLiss MCDU screen: one dataref per line and colour, for MCDU1 (captain) and MCDU2 (F/O).
+//   title (large) + stitle (small)                → row 0
+//   label1..6 (small)                             → rows 1, 3, …, 11
+//   cont1..6 (large) + scont1..6 (small)          → rows 2, 4, …, 12
+//   sp (scratchpad, large)                        → row 13
+// Colour suffix: w white, g green, b blue (cyan), y yellow, a amber, m magenta,
+// s special symbols (e.g. A/B = [ ] brackets). Each layer is a left-aligned
+// string; a space means "nothing in this layer here".
+export type TolissMcduColor = 'w' | 'g' | 'b' | 'y' | 'a' | 'm' | 's';
+type TolissLineNo = 1 | 2 | 3 | 4 | 5 | 6;
+export type TolissMcduField =
+  | `title${'w' | 'g' | 'y' | 'b' | 's'}`
+  | `stitle${'w' | 'g' | 'y' | 'b'}`
+  | `${'label' | 'cont' | 'scont'}${TolissLineNo}${TolissMcduColor}`
+  | `sp${'a' | 'w'}`;
+export type TolissMcduKey = `tl${1 | 2}_${TolissMcduField}`;
+
+const TL_ALL_COLORS: readonly TolissMcduColor[] = ['w', 'g', 'b', 'y', 'a', 'm', 's'];
+export const TOLISS_MCDU_FIELDS: readonly TolissMcduField[] = [
+  ...(['w', 'g', 'y', 'b', 's'] as const).map((c) => `title${c}` as const),
+  ...(['w', 'g', 'y', 'b'] as const).map((c) => `stitle${c}` as const),
+  ...(['label', 'cont', 'scont'] as const).flatMap((p) =>
+    ([1, 2, 3, 4, 5, 6] as const).flatMap((i) => TL_ALL_COLORS.map((c) => `${p}${i}${c}` as const)),
+  ),
+  ...(['a', 'w'] as const).map((c) => `sp${c}` as const),
+];
+
+/** Which add-on a dataref belongs to. Each family is discovered with one batch request. */
+export type DatarefFamily = 'core' | 'zibo' | 'ziboDest' | 'ff777' | 'toliss' | 'tolissMcdu';
 
 export interface DatarefSpec {
   key: TelemetryKey;
@@ -56,6 +93,8 @@ export interface DatarefSpec {
   kind: DatarefKind;
   /** `aircraft` datarefs belong to an add-on and can appear/disappear when the aircraft changes. */
   group: 'sim' | 'aircraft';
+  /** Discovery batch (default `core`). The first spec of a family is its probe. */
+  family?: DatarefFamily;
   /** Without it the app cannot report sim state at all. */
   required?: boolean;
   unit: string;
@@ -68,6 +107,7 @@ export const ACCEPTED_VALUE_TYPES: Record<DatarefKind, readonly string[]> = {
   string: ['data'],
   screen: ['data'],
   intArray: ['int_array'],
+  line: ['data'],
 };
 
 export const DATAREFS: readonly DatarefSpec[] = [
@@ -93,34 +133,56 @@ export const DATAREFS: readonly DatarefSpec[] = [
   // lnav_dist_next + remaining leg distances to the T/D leg − T/D offset.
   // 9999 = FMC recalculating; ≤ 0 = T/D passed. Same value the Zibo FMC
   // uses for its PROGRESS / LEGS "T/D" logic.
-  { key: 'ziboTdDist', name: 'laminar/B738/fms/vnav_td_dist', kind: 'number', group: 'aircraft', unit: 'nm' },
+  { key: 'ziboTdDist', name: 'laminar/B738/fms/vnav_td_dist', kind: 'number', group: 'aircraft', family: 'zibo', unit: 'nm' },
   // Index of the leg containing T/D; 0 = no T/D computed.
-  { key: 'ziboTdIdx', name: 'laminar/B738/fms/vnav_td_idx', kind: 'number', group: 'aircraft', unit: 'index' },
+  { key: 'ziboTdIdx', name: 'laminar/B738/fms/vnav_td_idx', kind: 'number', group: 'aircraft', family: 'zibo', unit: 'index' },
   // Zibo FMS flight phase (2 = cruise; < 5 before descent; 8 = special case used with T/D).
-  { key: 'ziboFlightPhase', name: 'laminar/B738/FMS/flight_phase', kind: 'number', group: 'aircraft', unit: 'enum' },
+  { key: 'ziboFlightPhase', name: 'laminar/B738/FMS/flight_phase', kind: 'number', group: 'aircraft', family: 'zibo', unit: 'enum' },
   // Zibo FMC: NM to destination along the route (sum of remaining legs from the aircraft).
-  { key: 'ziboDestDist', name: 'laminar/B738/FMS/dist_dest', kind: 'number', group: 'aircraft', unit: 'nm' },
+  { key: 'ziboDestDist', name: 'laminar/B738/FMS/dist_dest', kind: 'number', group: 'aircraft', family: 'ziboDest', unit: 'nm' },
   // Zibo FMC: its own predicted arrival time, "HHMM" in sim Zulu time ("" when unknown).
-  { key: 'ziboDestEta', name: 'laminar/B738/FMS/time_dest', kind: 'string', group: 'aircraft', unit: 'HHMM' },
-  { key: 'ziboDestIcao', name: 'laminar/B738/fms/dest_icao', kind: 'string', group: 'aircraft', unit: 'text' },
+  { key: 'ziboDestEta', name: 'laminar/B738/FMS/time_dest', kind: 'string', group: 'aircraft', family: 'ziboDest', unit: 'HHMM' },
+  { key: 'ziboDestIcao', name: 'laminar/B738/fms/dest_icao', kind: 'string', group: 'aircraft', family: 'ziboDest', unit: 'text' },
 
   // FlightFactor 777v2 (docs/cduDatarefs.txt). Its FMC exposes no route/T/D/ETA
   // datarefs, but it publishes the exact text of each CDU screen (left, centre,
   // right): 14 lines × 24 chars, plus per-character colour and size. T/D and
   // destination ETA are read from whichever CDU shows PROGRESS page 1.
-  { key: 'ffCduLines', name: '1-sim/cduL/display/numOfLines', kind: 'number', group: 'aircraft', unit: 'lines' },
-  { key: 'ffCduCols', name: '1-sim/cduL/display/numOfSymbolsInLine', kind: 'number', group: 'aircraft', unit: 'chars' },
-  { key: 'ffCduL', name: '1-sim/cduL/display/symbols', kind: 'screen', group: 'aircraft', unit: 'text' },
-  { key: 'ffCduC', name: '1-sim/cduC/display/symbols', kind: 'screen', group: 'aircraft', unit: 'text' },
-  { key: 'ffCduR', name: '1-sim/cduR/display/symbols', kind: 'screen', group: 'aircraft', unit: 'text' },
+  { key: 'ffCduLines', name: '1-sim/cduL/display/numOfLines', kind: 'number', group: 'aircraft', family: 'ff777', unit: 'lines' },
+  { key: 'ffCduCols', name: '1-sim/cduL/display/numOfSymbolsInLine', kind: 'number', group: 'aircraft', family: 'ff777', unit: 'chars' },
+  { key: 'ffCduL', name: '1-sim/cduL/display/symbols', kind: 'screen', group: 'aircraft', family: 'ff777', unit: 'text' },
+  { key: 'ffCduC', name: '1-sim/cduC/display/symbols', kind: 'screen', group: 'aircraft', family: 'ff777', unit: 'text' },
+  { key: 'ffCduR', name: '1-sim/cduR/display/symbols', kind: 'screen', group: 'aircraft', family: 'ff777', unit: 'text' },
   // 1 white, 2 magenta, 3 green, 4 cyan, 5 grey, 6 blue
-  { key: 'ffCduLColor', name: '1-sim/cduL/display/symbolsColor', kind: 'intArray', group: 'aircraft', unit: 'enum[]' },
-  { key: 'ffCduCColor', name: '1-sim/cduC/display/symbolsColor', kind: 'intArray', group: 'aircraft', unit: 'enum[]' },
-  { key: 'ffCduRColor', name: '1-sim/cduR/display/symbolsColor', kind: 'intArray', group: 'aircraft', unit: 'enum[]' },
+  { key: 'ffCduLColor', name: '1-sim/cduL/display/symbolsColor', kind: 'intArray', group: 'aircraft', family: 'ff777', unit: 'enum[]' },
+  { key: 'ffCduCColor', name: '1-sim/cduC/display/symbolsColor', kind: 'intArray', group: 'aircraft', family: 'ff777', unit: 'enum[]' },
+  { key: 'ffCduRColor', name: '1-sim/cduR/display/symbolsColor', kind: 'intArray', group: 'aircraft', family: 'ff777', unit: 'enum[]' },
   // 1 normal, 2 small
-  { key: 'ffCduLSize', name: '1-sim/cduL/display/symbolsSize', kind: 'intArray', group: 'aircraft', unit: 'enum[]' },
-  { key: 'ffCduCSize', name: '1-sim/cduC/display/symbolsSize', kind: 'intArray', group: 'aircraft', unit: 'enum[]' },
-  { key: 'ffCduRSize', name: '1-sim/cduR/display/symbolsSize', kind: 'intArray', group: 'aircraft', unit: 'enum[]' },
+  { key: 'ffCduLSize', name: '1-sim/cduL/display/symbolsSize', kind: 'intArray', group: 'aircraft', family: 'ff777', unit: 'enum[]' },
+  { key: 'ffCduCSize', name: '1-sim/cduC/display/symbolsSize', kind: 'intArray', group: 'aircraft', family: 'ff777', unit: 'enum[]' },
+  { key: 'ffCduRSize', name: '1-sim/cduR/display/symbolsSize', kind: 'intArray', group: 'aircraft', family: 'ff777', unit: 'enum[]' },
+
+  // ToLiss A321 (AirbusFBW plugin). Checked live 2026-11-21 (A321neo, VABB → VIDP).
+  // FMS distance to destination along the flight plan; matches the F-PLN DEST "DIST".
+  { key: 'tlDistDest', name: 'AirbusFBW/DistToDest', kind: 'number', group: 'aircraft', family: 'toliss', unit: 'nm' },
+  { key: 'tlDestIcao', name: 'toliss_airbus/flightplan/destination_icao', kind: 'string', group: 'aircraft', family: 'toliss', unit: 'text' },
+  // INIT A cruise altitude in feet (35000 = FL350).
+  { key: 'tlCruiseAlt', name: 'toliss_airbus/init/cruise_alt', kind: 'number', group: 'aircraft', family: 'toliss', unit: 'ft' },
+  // FMGS flight phase: 0 preflight, 1 takeoff, 2 climb, 3 cruise, 4 descent, 5 approach, 6 go-around, 7 done.
+  { key: 'tlFmgsPhase', name: 'AirbusFBW/APPhase', kind: 'number', group: 'aircraft', family: 'toliss', unit: 'enum' },
+  // MCDU1 / MCDU2 screen layers (see TolissMcduKey above).
+  ...([1, 2] as const).flatMap((n) =>
+    TOLISS_MCDU_FIELDS.map(
+      (f): DatarefSpec => ({
+        key: `tl${n}_${f}`,
+        name: `AirbusFBW/MCDU${n}${f}`,
+        kind: 'line',
+        group: 'aircraft',
+        family: 'tolissMcdu',
+        unit: 'text',
+      }),
+    ),
+  ),
 ];
 
 export const DATAREF_BY_NAME: ReadonlyMap<string, DatarefSpec> = new Map(DATAREFS.map((d) => [d.name, d]));
@@ -160,6 +222,18 @@ export function decodeScreen(value: unknown): string | null {
   }
 }
 
+/** Decode one display line (ToLiss MCDU layer): cut at the first NUL, keep leading spaces. */
+export function decodeLine(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  try {
+    const text = Buffer.from(value, 'base64').toString('latin1');
+    const nul = text.indexOf('\0');
+    return (nul >= 0 ? text.slice(0, nul) : text).replace(/[\x00-\x1f\x7f-\xff]/g, ' ').slice(0, 64);
+  } catch {
+    return null;
+  }
+}
+
 /** Normalise a raw Web API value according to the dataref kind. Returns null if invalid. */
 export function normaliseValue(spec: DatarefSpec, value: unknown): TelemetryValue | null {
   switch (spec.kind) {
@@ -167,6 +241,8 @@ export function normaliseValue(spec: DatarefSpec, value: unknown): TelemetryValu
       return decodeDataString(value);
     case 'screen':
       return decodeScreen(value);
+    case 'line':
+      return decodeLine(value);
     case 'intArray':
       return Array.isArray(value) && value.length <= 4096 && value.every((x) => Number.isInteger(x)) ? (value as number[]) : null;
     case 'number':

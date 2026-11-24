@@ -1005,6 +1005,12 @@ a {
 .cdu-c6 {
   color: #6c8cff;
 }
+.cdu-c7 {
+  color: #ffb020;
+}
+.cdu-c8 {
+  color: #ffe94d;
+}
 
 .cdu:not(.is-open) .card-head {
   margin-bottom: 0;

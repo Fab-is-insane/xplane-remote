@@ -112,7 +112,7 @@ export function useLiveState(enabled: boolean, onUnauthorized: () => void): Live
           const msg = JSON.parse((e as MessageEvent<string>).data) as CduMirror | null;
           setLive((l) => {
             if (!msg) return { ...l, cdu: null };
-            if (!msg.partial || !l.cdu) return { ...l, cdu: msg };
+            if (!msg.partial || !l.cdu || l.cdu.aircraft !== msg.aircraft) return { ...l, cdu: msg };
             // Partial update: replace only the screens that changed.
             const bySide = new Map(l.cdu.screens.map((s) => [s.side, s]));
             for (const s of msg.screens) bySide.set(s.side, s);

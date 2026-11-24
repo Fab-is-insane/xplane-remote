@@ -35,6 +35,8 @@ export class FakeXPlane {
   port = 0;
   paused = false;
   activations: string[] = [];
+  /** Number of names in each GET /datarefs?filter[name]=… request, in order. */
+  datarefQueries: number[] = [];
   datarefs: FakeDataref[] = [];
   commands: Array<{ id: number; name: string; description: string }> = [];
   private sockets = new Set<WebSocket>();
@@ -133,6 +135,13 @@ export class FakeXPlane {
     if (route === 'datarefs/count') return this.json(res, 200, { data: this.opts.noFlight ? 0 : this.datarefs.length });
     if (route === 'datarefs') {
       const list = this.opts.noFlight ? [] : this.datarefs.filter((d) => names.length === 0 || names.includes(d.name));
+      // Like real X-Plane 12.4.3: one unknown name fails the whole batch.
+      const unknown = names.find((n) => !list.some((d) => d.name === n));
+      if (unknown !== undefined && !this.opts.noFlight) {
+        this.datarefQueries.push(names.length);
+        return this.json(res, 404, { error_code: 'invalid_dataref_name', error_message: `Dataref name '${unknown}' doesn't exist` });
+      }
+      this.datarefQueries.push(names.length);
       return this.json(res, 200, { data: list.map(({ id, name, value_type }) => ({ id, name, value_type })) });
     }
     const vm = route.match(/^datarefs\/(\d+)\/value$/);

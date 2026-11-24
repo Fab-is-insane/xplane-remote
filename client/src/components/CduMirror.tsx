@@ -5,6 +5,12 @@ const SIDE_KEY = 'xpr.cdu.side';
 const OPEN_KEY = 'xpr.cdu.open';
 const SIDE_NAME: Record<CduScreen['side'], string> = { L: 'CAPT', C: 'CTR', R: 'F/O' };
 
+/** Per aircraft: panel title, dataref shown in the hint, and the name used while waiting. */
+const AIRCRAFT = {
+  ff777: { title: 'CDU mirror', ref: (s: string) => `1-sim/cdu${s}/display/symbols`, name: 'the 777', fmc: 'FF777' },
+  toliss: { title: 'MCDU mirror', ref: (s: string) => `AirbusFBW/MCDU${s === 'R' ? 2 : 1}*`, name: 'the ToLiss', fmc: 'ToLiss' },
+} as const;
+
 function load(key: string): string | null {
   try {
     return localStorage.getItem(key);
@@ -22,11 +28,12 @@ function save(key: string, value: string) {
 }
 
 /**
- * Read-only live mirror of the FlightFactor 777 CDUs, drawn from the screen
- * text, colour and size datarefs the aircraft publishes. Used instead of
- * WebFMC, which does not support the FF777.
+ * Read-only live mirror of the FlightFactor 777 CDUs or ToLiss MCDUs, drawn
+ * from the screen text, colour and size datarefs the aircraft publishes. Used
+ * instead of WebFMC, whose free version supports neither.
  */
-export function CduMirror({ data }: { data: CduMirrorData | null }) {
+export function CduMirror({ data, profile }: { data: CduMirrorData | null; profile: 'ff777' | 'toliss' }) {
+  const acf = AIRCRAFT[profile];
   const screens = data?.screens ?? [];
   const [picked, setPicked] = useState<string | null>(() => load(SIDE_KEY));
   const [open, setOpen] = useState(() => load(OPEN_KEY) !== '0');
@@ -48,7 +55,7 @@ export function CduMirror({ data }: { data: CduMirrorData | null }) {
       <div className="card-head">
         <button type="button" className="collapse-btn" onClick={toggle} aria-expanded={open} aria-controls={bodyId}>
           <h2 id="cdu-title" className="card-title">
-            CDU mirror
+            {acf.title}
           </h2>
           <span className="collapse-state" aria-hidden="true">
             {open ? '[-]' : '[+]'}
@@ -66,7 +73,7 @@ export function CduMirror({ data }: { data: CduMirrorData | null }) {
                 onClick={() => choose(s.side)}
               >
                 {SIDE_NAME[s.side]}
-                {s.isProgress && <span className="cdu-prog">PROG</span>}
+                {(s.badge ?? (s.isProgress ? 'PROG' : null)) && <span className="cdu-prog">{s.badge ?? 'PROG'}</span>}
               </button>
             ))}
           </div>
@@ -84,10 +91,12 @@ export function CduMirror({ data }: { data: CduMirrorData | null }) {
           </div>
         ) : (
           <p className="feedback tone-muted">
-            <span className="cursor">waiting for CDU data from the 777</span>
+            <span className="cursor">waiting for CDU data from {acf.name}</span>
           </p>
         )}
-        <p className="hint">read-only // 1-sim/cdu{screen?.side ?? 'L'}/display/symbols // WebFMC does not support the FF777</p>
+        <p className="hint">
+          read-only // {acf.ref(screen?.side ?? 'L')} // WebFMC does not support the {acf.fmc}
+        </p>
       </div>
     </section>
   );

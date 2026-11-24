@@ -169,6 +169,98 @@ Destination ETA uses the same two estimates as the Zibo: DEST DTG ÷ ground spee
 
 **Live-verified:** profile detection, telemetry, DEST VIDP 60 → 18 → 5 NM with matching FMC ETAs in descent, and the colour CDU mirror of all three CDUs (2026-11-02). In cruise at FL370 (2026-11-03): `TO STEP CLB` page, T/D estimate 3851 − 121 = ~3730 NM. Not yet seen live: the change from ahead to PASSED at the real T/D, or a `TO T/C` (climb) page. Those are covered by tests.
 
+## ToLiss A321
+
+Installed at `Aircraft\Toliss Airbus A321 v1.3.2` (AirbusFBW plugin). Checked live on 2026-11-21 with the A321neo climbing out of VABB for VIDP. The manuals shipped with the aircraft do not document datarefs, so everything below comes from the live sim.
+
+- **WebFMC 2.4.1** logs `acf_ICAO: 'A321', acf_author: 'Gliding Kiwi' … Unsupported aircraft`.
+- **X-Plane's own FMS is not used**: `sim/cockpit/gps/destination_index = -1`, `sim/cockpit2/radios/indicators/fms_distance_to_tod_pilot = 0`.
+- **No T/D dataref.** All 11,095 dataref names were searched for `tod`, `t_d`, `descent`, `vnav`, `path`.
+
+Datarefs used (all read-only):
+
+| Dataref | Type | Live value | Use |
+|---|---|---|---|
+| `AirbusFBW/DistToDest` | float | 605 → 548 NM | distance to destination along the flight plan; matches F-PLN DEST "DIST" |
+| `toliss_airbus/flightplan/destination_icao` | data | `VIDP` | destination |
+| `toliss_airbus/init/cruise_alt` | float | 35000 | CRZ FL for the T/D estimate |
+| `AirbusFBW/APPhase` | int | 2 in the climb | FMGS phase: 0 preflight, 1 takeoff, 2 climb, 3 cruise, 4 descent, 5 approach, 6 go-around, 7 done |
+| `AirbusFBW/MCDU{1,2}{title,stitle,label1-6,cont1-6,scont1-6,sp}{w,g,b,y,a,m,s}` | data | see below | MCDU screen, one string per line and colour |
+
+**APPhase values:** only *2 = climb* has been seen live so far. The rest of the enumeration is the standard Airbus FMGS phase order and is **not yet confirmed**. If the phase dataref is missing, the app falls back to the FF777's altitude-history rule.
+
+**MCDU layers.** Each line is a left-aligned string per colour; a space means "nothing in this colour here". Row layout: title (large) + stitle (small) → row 0; label*n* (small) → rows 1, 3, …, 11; cont*n* (large) + scont*n* (small) → rows 2, 4, …, 12; sp (scratchpad) → row 13. Colours: w white, g green, b cyan, y yellow, a amber, m magenta, s special symbols. In `s`, `A`/`B` are `[` `]` (confirmed on PROG "UPDATE AT *[    ]"); the digits are taken to be arrows (title `23` = ↑↓ on F-PLN; best guess, cosmetic). In every layer, `` ` `` is the degree sign.
+
+F-PLN as rebuilt by the app:
+
+```
+ FROM          6488   ↑↓
+        TIME  SPD/ALT
+MB361   1559  301/ FL165
+ ALBA2B BRG007°  11NM
+…
+(T/C)   1610   " / FL350
+DEST    UTC   DIST  EFOB
+VIDP11L 1722   548   3.0      → FMS ETA 1722Z (only when the column says UTC, not TIME)
+```
+
+**T/D from the FMS (PROG → REPORT).** There is no T/D dataref, but the FMS prints its own T/D on the REPORT page (MCDU PROG key → REPORT), line 5. This is documented in the ToLiss tutorial and was captured live on 2026-11-23:
+
+```
+      REPORT 6488
+ OVHD          UTC  ALT
+VABB27        1158    30
+ TO
+ANOLI         1202 FL095
+ NEXT
+MB361         1210 FL240
+ SAT     T.WIND     FOB
++17°    056°/013     6.9
+ T/D      UTC DIST              ← heading
+AT FL350 1309  507              → T/D at 1309Z, 507 NM, for FL350
+ DEST     UTC DIST  EFOB
+VIDP11L  1334  632   3.2
+```
+
+**PERF CRZ** shows the same figures in a second layout, with a `TO (T/D)` marker on the line *above* the headings (captured live the same day, while REPORT on the other MCDU read 1302Z / 415 NM):
+
+```
+           CRZ
+ACT MODE   UTC DEST EFOB
+MANAGED   1327       3.2
+ CI
+12              TO (T/D)        ← marker
+ MANAGED   UTC      DIST        ← headings
+ 267/.78  1302       416        → T/D at 1302Z, 416 NM (no level on this page)
+```
+
+The app reads the values **by column**, under the `UTC` and `DIST` headings, for either layout: `T/D` in the heading line (REPORT) or `TO (T/D)` on the line above (PERF CRZ). `TO (E/D)` and other markers are ignored. If both pages are open, MCDU1 is read first; they agree to within a few seconds.
+
+Live checks: from REPORT, the app reported 471 NM / 1306Z and the page read 469 NM / 1305Z a few seconds later, at about 7 NM/min (the estimate would have said ~485 NM). From PERF CRZ, the app reported 399 NM / 1301Z, against REPORT's 397 NM / 1301Z.
+
+**Order of precedence:**
+
+1. APPhase ≥ 4 → *Passed*.
+2. A T/D line on either MCDU → the FMS distance and time, without "EST".
+3. Otherwise the **estimate**, like the FF777's, but from the INIT CRZ FL instead of the current altitude, so it is meaningful in the climb: `DistToDest − (max(CRZ FL, altitude)/1000 × 3 + 10)`. Example: 548.4 − (35 × 3 + 10) = ~433 NM.
+
+**Discovery cost.** The MCDU alone is 274 datarefs, and X-Plane 12.4.3 answers a name batch with 404 if *any* name is unknown. The 404 names one missing dataref, but not necessarily the first in request order. Names are therefore resolved per add-on family:
+
+- **Family present:** one batch.
+- **Family not loaded:** the 404, then a check on the family's first name, so 2 requests.
+- **A few names missing:** each one is dropped and remembered, then the batch is retried. This happens once per aircraft load.
+
+Before this, every refresh of an absent add-on's names fell back to one request per name.
+
+**Live-verified 2026-11-21:**
+
+- Profile detection.
+- T/D estimate (~433 NM).
+- Destination VIDP 548 NM, with live ETA 76 min and FMS ETA 1722Z from the MCDU1 F-PLN.
+- The colour MCDU mirror of both MCDUs (F-PLN and PROG), checked in the browser.
+
+**Not yet seen live:** an APPhase other than 2, the change to *Passed* at T/D, and what the REPORT T/D line shows after T/D or before a flight plan exists. Those cases are parsed as "no figures" and fall back to the estimate.
+
 ## WebFMC
 
 - Served by a Go backend (`gorilla/websocket`) from `Resources/plugins/WebFMC/data`. `index.html` loads `/static/js/app.<hash>.js`, `/static/js/chunk-vendors.<hash>.js` and `/static/css/app.<hash>.css`.

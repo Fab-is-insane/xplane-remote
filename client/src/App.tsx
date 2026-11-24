@@ -77,8 +77,12 @@ function Dashboard({ onUnauthorized }: { onUnauthorized: () => void }) {
           <FlightStatus state={state} live={link.live} ageMs={ageMs} />
         </div>
         <div className="col-side">
-          {/* WebFMC does not support the FF777, so show the CDU mirror instead. */}
-          {state?.profile === 'ff777' ? <CduMirror data={cdu} /> : <WebFmcPanel onUnauthorized={onUnauthorized} />}
+          {/* WebFMC (free) supports neither the FF777 nor the ToLiss, so show the CDU mirror instead. */}
+          {state?.profile === 'ff777' || state?.profile === 'toliss' ? (
+            <CduMirror data={cdu} profile={state.profile} />
+          ) : (
+            <WebFmcPanel onUnauthorized={onUnauthorized} />
+          )}
         </div>
       </main>
       <footer className="foot">
